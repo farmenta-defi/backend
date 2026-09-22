@@ -1,7 +1,14 @@
 -- Run once as a Postgres superuser. Set the password interactively afterwards:
 -- psql -U postgres -c '\\password farmenta_backend'
-create role farmenta_backend login noinherit;
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'farmenta_backend') then
+    create role farmenta_backend login noinherit;
+  end if;
+end
+$$;
 grant connect on database farmenta to farmenta_backend;
+revoke connect on database lpmon from farmenta_backend;
 
 -- Application data lives in its own schema. The backend may not mutate Ponder/indexer data.
 create schema if not exists backend authorization farmenta_backend;

@@ -52,6 +52,9 @@ psql "$DATABASE_URL" -c 'insert into ponder.loan (market, token_id) values (''0x
 # ERROR: permission denied for table loan
 ```
 
+The provision script also revokes this role's `CONNECT` privilege on the unrelated `lpmon`
+database on the shared Postgres server.
+
 ## Contract artifacts and deployments
 
 `contracts/source.json` pins the `smart-contract` revision shared with the indexer. Regenerate
