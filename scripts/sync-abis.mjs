@@ -10,6 +10,7 @@ if (!process.env.SMART_CONTRACT_DIR) {
   try {
     execFileSync('git', ['clone', '--recurse-submodules', pin.repo, source], { stdio: 'inherit' });
   } catch {}
+  execFileSync('git', ['-C', source, 'checkout', '--detach', pin.commit], { stdio: 'inherit' });
 }
 const commit = execFileSync('git', ['-C', source, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 if (commit !== pin.commit) throw new Error(`smart-contract must be pinned at ${pin.commit}`);

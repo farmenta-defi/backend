@@ -17,6 +17,9 @@ psql -U postgres -d farmenta -f scripts/create-db-role.sql
 psql -U postgres -c '\\password farmenta_backend'
 ```
 
+Start the indexer once before this step so Ponder has created schema `ponder`; the provisioning
+script stops on error rather than silently omitting the backend's read grant.
+
 Install dependencies and create the local environment file. `.env` contains secrets and must
 remain mode 600.
 
@@ -39,7 +42,9 @@ Ponder's `/status` timestamp to compute lag in seconds. A failed dependency chan
 status to `error` without returning URLs, credentials, or provider error text.
 
 Only origins in `CORS_ORIGINS` are accepted. The API applies a 60-requests-per-minute limit per
-IP. No route accepts arbitrary `eth_call` or other JSON-RPC payloads.
+IP. Set `TRUST_PROXY=1` only behind the VPS's single trusted reverse proxy so the limiter uses
+the client IP rather than the proxy address. No route accepts arbitrary `eth_call` or other
+JSON-RPC payloads.
 
 ## Database ownership
 

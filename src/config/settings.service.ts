@@ -10,6 +10,7 @@ export class SettingsService {
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
+  readonly trustProxy = process.env.TRUST_PROXY === '1';
 }
 
 function requireUrl(name: string): string {
