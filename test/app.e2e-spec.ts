@@ -50,6 +50,13 @@ describe('AppController (e2e)', () => {
       .expect(404);
   });
 
+  it('returns 429 after the per-IP request limit', async () => {
+    const responses = await Promise.all(
+      Array.from({ length: 61 }, () => request(app.getHttpServer()).get('/health')),
+    );
+    expect(responses.some((response) => response.status === 429)).toBe(true);
+  });
+
   afterEach(async () => {
     await app?.close();
   });
