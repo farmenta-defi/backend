@@ -3,6 +3,7 @@ import { INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module.js';
+import { configureApp } from './../src/app.config.js';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -17,6 +18,7 @@ describe('AppController (e2e)', () => {
     }).compile();
 
     app = moduleFixture.createNestApplication();
+    configureApp(app);
     await app.init();
   });
 
@@ -32,6 +34,20 @@ describe('AppController (e2e)', () => {
           indexer: { status: 'error' },
         });
       });
+  });
+
+  it('rejects an origin outside the frontend allowlist', () => {
+    return request(app.getHttpServer())
+      .get('/health')
+      .set('Origin', 'https://attacker.example')
+      .expect(500);
+  });
+
+  it('does not expose a generic JSON-RPC proxy', () => {
+    return request(app.getHttpServer())
+      .post('/rpc')
+      .send({ method: 'eth_call', params: [] })
+      .expect(404);
   });
 
   afterEach(async () => {

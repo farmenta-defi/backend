@@ -1,124 +1,78 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Farmenta backend
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+NestJS API running directly on Bun for the Farmenta frontend and owner tooling. It is a
+server-side service: paid RPC credentials stay in `.env`; it intentionally exposes no generic
+JSON-RPC forwarding route.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+The architecture specification in [`farmenta-defi/docs`](https://github.com/farmenta-defi/docs)
+(`ARCHITECTURE.md` §13) is the source of truth.
 
-## Description
+## Local setup
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+Requires Bun and PostgreSQL. Create a database named `farmenta`, then provision the backend
+role as a PostgreSQL superuser:
 
-## Project setup
-
-```bash
-$ bun install
+```sh
+psql -U postgres -d farmenta -f scripts/create-db-role.sql
+psql -U postgres -c '\\password farmenta_backend'
 ```
 
-## Compile and run the project
+Install dependencies and create the local environment file. `.env` contains secrets and must
+remain mode 600.
 
-```bash
-# development
-$ bun run start
-
-# watch mode
-$ bun run start:dev
-
-# production mode
-$ bun run start:prod
+```sh
+bun install
+cp .env.example .env
+chmod 600 .env
+# Fill DATABASE_URL, RPC_URL, INDEXER_STATUS_URL, and CORS_ORIGINS.
+bun run db:migrate
+bun run src/main.ts
 ```
 
-## Run tests
+`DATABASE_URL` must name database `farmenta`; startup and migrations reject another database.
+`RPC_URL` is server-only. Do not put it in frontend environment variables or logs.
 
-```bash
-# unit tests
-$ bun run test
+## Health endpoint
 
-# e2e tests
-$ bun run test:e2e
+`GET /health` reports `database`, `rpc`, and `indexer` independently. The indexer result uses
+Ponder's `/status` timestamp to compute lag in seconds. A failed dependency changes the overall
+status to `error` without returning URLs, credentials, or provider error text.
 
-# test coverage
-$ bun run test:cov
+Only origins in `CORS_ORIGINS` are accepted. The API applies a 60-requests-per-minute limit per
+IP. No route accepts arbitrary `eth_call` or other JSON-RPC payloads.
+
+## Database ownership
+
+Application tables live in schema `backend`: `hf_snapshot`, `market_snapshot`, and
+`service_heartbeat`. Ponder owns schema `ponder`. `farmenta_backend` has read-only access to
+the latter, and the provision script revokes all write privileges from it. Verify the boundary:
+
+```sh
+psql "$DATABASE_URL" -c 'insert into ponder.loan (market, token_id) values (''0x0'', 0)'
+# ERROR: permission denied for table loan
 ```
 
-## Deployment
+## VPS deploy with pm2
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+On the VPS, run Bun under the same service account that owns `.env`:
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ bun install -g @nestjs/mau
-$ mau deploy
+```sh
+bun install --frozen-lockfile
+bun run db:migrate
+pm2 start ecosystem.config.cjs
+pm2 save
+pm2 logs farmenta-backend
+curl -s http://127.0.0.1:3000/health
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+The PM2 file runs `bun run src/main.ts` directly; there is no production build step. Run one
+instance until shared scheduling is introduced by a later ticket.
 
-## Observability
+## Checks
 
-In production applications, observability is essential for understanding how your system behaves, detecting issues early, and maintaining reliable performance.
-
-[NestJS Observe](https://observe.nestjs.com) automatically instruments your NestJS application, giving you deep visibility into your system with minimal setup:
-
-- **Distributed tracing:** Follow requests across services and understand how they flow through your system.
-- **Waterfall analysis:** Visualize request execution and identify slow operations, bottlenecks, and unexpected delays.
-- **Performance analysis:** Analyze application performance in real time and quickly pinpoint areas that need optimization.
-- **Metrics:** Track key application and infrastructure metrics to understand system health and performance trends.
-- **Logging:** Centralize and correlate logs with traces and other telemetry to make debugging easier.
-- **Error tracking:** Detect errors quickly and investigate their root causes with the surrounding context.
-- **SLA monitoring:** Track service-level objectives and identify when your application is approaching or exceeding defined thresholds.
-- **Alarms and alerts:** Set up alerts for critical errors, performance degradation, SLA violations, and other anomalies so your team can react quickly.
-
-To add it to this project:
-
-```bash
-$ bun install @nestjs/observe
+```sh
+bun run lint
+bun run test
+bun run test:e2e
+bun run build
 ```
-
-Then follow the [setup guide](https://docs.nestjs.com/observability/overview) - it takes a single import and an app key.
-
-The free plan needs no payment details and covers 300,000 events a month. You can also browse the [live demo](https://www.observe-demo.nestjs.com/dashboard) first - the whole dashboard over a busy service's data, with nothing to install.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Auto-instrument your application with [NestJS Observe](https://observe.nestjs.com). Distributed tracing, metrics, and logging made easy. Error tracking and performance monitoring for your NestJS applications.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
