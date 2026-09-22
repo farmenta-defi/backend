@@ -52,6 +52,13 @@ psql "$DATABASE_URL" -c 'insert into ponder.loan (market, token_id) values (''0x
 # ERROR: permission denied for table loan
 ```
 
+## Contract artifacts and deployments
+
+`contracts/source.json` pins the `smart-contract` revision shared with the indexer. Regenerate
+the server-side ABI files with `bun run abi:sync`; set `SMART_CONTRACT_DIR=../smart-contract`
+to reuse a clean checkout at that exact revision. Contract addresses are deployment configuration,
+not literals in application code. Copy `deployments/example.json` only after a deployment exists.
+
 ## VPS deploy with pm2
 
 On the VPS, run Bun under the same service account that owns `.env`:
