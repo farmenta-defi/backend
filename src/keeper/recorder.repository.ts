@@ -29,6 +29,7 @@ const recorderAbi = [{
   }],
   outputs: [],
 }] as const;
+const observationAbi = [{ type: 'function', name: 'observationCount', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ type: 'uint16' }] }] as const;
 
 export class ViemRecorderRepository implements RecorderRepository {
   private readonly publicClient: PublicClient;
@@ -71,7 +72,19 @@ export class ViemRecorderRepository implements RecorderRepository {
       });
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== 'success') throw new Error(`recordBatch transaction ${hash} reverted`);
-      return { hash, gasUsed: receipt.gasUsed };
+      return { hash, gasUsed: receipt.gasUsed, gasPrice: receipt.effectiveGasPrice };
+    });
+  }
+
+  async observationCounts(poolIds: `0x${string}`[]): Promise<number[]> {
+    if (poolIds.length === 0) return [];
+    return retryWithBackoff(async () => {
+      const results = await this.publicClient.multicall({
+        multicallAddress: this.multicallAddress,
+        allowFailure: false,
+        contracts: poolIds.map((poolId) => ({ address: this.recorderAddress, abi: observationAbi, functionName: 'observationCount', args: [poolId] })),
+      });
+      return results.map(Number);
     });
   }
 }

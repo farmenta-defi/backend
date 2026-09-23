@@ -29,20 +29,29 @@ export class KeeperService {
       return { dryRun, poolCount: activePools.length, pools: activePools };
     }
 
+    const observationCounts = await this.recorder.observationCounts(activePools.map((pool) => pool.id));
+    const filling = observationCounts.some((count) => count < 2_048);
+    const budgetUsd = (filling ? 3.3 : 2.1) * (activePools.length / 5);
     const receipt = await this.recorder.recordBatch(activePools);
     const ranAt = this.now();
+    const gasCostUsd = Number(receipt.gasUsed * receipt.gasPrice) / 1e18 * 2_400;
     await this.runs.save({
       ranAt,
       poolCount: activePools.length,
       gasUsed: receipt.gasUsed,
+      gasCostUsd,
+      budgetUsd,
       transactionHash: receipt.hash,
     });
+    if (await this.runs.dailyCostUsd() > budgetUsd) {
+      await this.alerts.send(`Keeper daily gas cost exceeds the ${filling ? 'filling' : 'steady-state'} budget of $${budgetUsd.toFixed(2)}.`);
+    }
     await this.runs.heartbeat(ranAt);
     return { dryRun: false, poolCount: activePools.length, transactionHash: receipt.hash };
   }
 
   private async activePoolIds(candidates: Awaited<ReturnType<IndexerRepository['candidates']>>) {
-    const candidatesByMarket = new Map<string, typeof candidates>();
+    const candidatesByMarket = new Map<(typeof candidates)[number]['market'], typeof candidates>();
     for (const candidate of candidates) {
       const marketCandidates = candidatesByMarket.get(candidate.market) ?? [];
       marketCandidates.push(candidate);

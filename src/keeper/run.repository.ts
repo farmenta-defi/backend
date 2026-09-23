@@ -11,9 +11,9 @@ export class PostgresKeeperRunRepository implements KeeperRunRepository {
   async save(run: KeeperRun): Promise<void> {
     await this.pool.query(
       `insert into backend.keeper_record_batch_run
-         (ran_at, pool_count, gas_used, transaction_hash)
-       values (to_timestamp($1), $2, $3, $4)`,
-      [run.ranAt, run.poolCount, run.gasUsed.toString(), run.transactionHash],
+         (ran_at, pool_count, gas_used, gas_cost_usd, budget_usd, transaction_hash)
+       values (to_timestamp($1), $2, $3, $4, $5, $6)`,
+      [run.ranAt, run.poolCount, run.gasUsed.toString(), run.gasCostUsd, run.budgetUsd, run.transactionHash],
     );
   }
 
@@ -24,6 +24,15 @@ export class PostgresKeeperRunRepository implements KeeperRunRepository {
        on conflict (service) do update set observed_at = excluded.observed_at`,
       [at],
     );
+  }
+
+  async dailyCostUsd(): Promise<number> {
+    const result = await this.pool.query<{ cost: string }>(
+      `select coalesce(sum(gas_cost_usd), 0)::text as cost
+       from backend.keeper_record_batch_run
+       where ran_at >= date_trunc('day', now())`,
+    );
+    return Number(result.rows[0].cost);
   }
 
   async close(): Promise<void> {

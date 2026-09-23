@@ -20,12 +20,15 @@ export interface KeeperCandidate {
 export interface RecordReceipt {
   hash: string;
   gasUsed: bigint;
+  gasPrice: bigint;
 }
 
 export interface KeeperRun {
   ranAt: number;
   poolCount: number;
   gasUsed: bigint;
+  gasCostUsd: number;
+  budgetUsd: number;
   transactionHash: string;
 }
 
@@ -37,11 +40,13 @@ export interface IndexerRepository {
 
 export interface RecorderRepository {
   debts(market: Address, tokenIds: bigint[]): Promise<bigint[]>;
+  observationCounts(poolIds: PoolId[]): Promise<number[]>;
   recordBatch(pools: PoolKey[]): Promise<RecordReceipt>;
 }
 
 export interface KeeperRunRepository {
   save(run: KeeperRun): Promise<void>;
+  dailyCostUsd(): Promise<number>;
   heartbeat(at: number): Promise<void>;
 }
 
