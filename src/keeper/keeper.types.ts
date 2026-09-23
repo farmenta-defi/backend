@@ -1,0 +1,50 @@
+export type Address = `0x${string}`;
+export type PoolId = `0x${string}`;
+
+export interface PoolKey {
+  id: PoolId;
+  currency0: Address;
+  currency1: Address;
+  fee: number;
+  tickSpacing: number;
+  hooks: Address;
+  observationAgeSeconds: number | null;
+}
+
+export interface KeeperCandidate {
+  market: Address;
+  tokenId: bigint;
+  poolId: PoolId;
+}
+
+export interface RecordReceipt {
+  hash: string;
+  gasUsed: bigint;
+}
+
+export interface KeeperRun {
+  ranAt: number;
+  poolCount: number;
+  gasUsed: bigint;
+  transactionHash: string;
+}
+
+export interface IndexerRepository {
+  assertFresh(): Promise<void>;
+  candidates(): Promise<KeeperCandidate[]>;
+  pools(): Promise<PoolKey[]>;
+}
+
+export interface RecorderRepository {
+  debts(market: Address, tokenIds: bigint[]): Promise<bigint[]>;
+  recordBatch(pools: PoolKey[]): Promise<RecordReceipt>;
+}
+
+export interface KeeperRunRepository {
+  save(run: KeeperRun): Promise<void>;
+  heartbeat(at: number): Promise<void>;
+}
+
+export interface AlertRepository {
+  send(message: string): Promise<void>;
+}
