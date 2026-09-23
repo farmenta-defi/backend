@@ -31,7 +31,10 @@ export class KeeperService {
 
     const ranAt = this.now();
     const slot = Math.floor(ranAt / 300) * 300;
-    if (!await this.runs.claimRunSlot(slot, ranAt)) return { dryRun: false, poolCount: activePools.length, skipped: true };
+    if (!await this.runs.claimRunSlot(slot, ranAt)) {
+      await this.runs.heartbeat(ranAt);
+      return { dryRun: false, poolCount: activePools.length, skipped: true };
+    }
     if (activePools.length === 0) {
       await this.runs.heartbeat(ranAt);
       return { dryRun: false, poolCount: 0 };
@@ -53,7 +56,7 @@ export class KeeperService {
     await this.runs.completeRunSlot(slot, receipt.hash);
     const budgetAlertKey = `keeper-budget-${new Date(ranAt * 1_000).toISOString().slice(0, 10)}`;
     if (await this.runs.dailyCostUsd() > budgetUsd && await this.runs.claimAlert(budgetAlertKey, ranAt, 86_400)) {
-      await this.sendAlert(`Keeper daily gas cost exceeds the ${filling ? 'filling' : 'steady-state'} budget of $${budgetUsd.toFixed(2)}.`);
+      await this.sendAlert(budgetAlertKey, `Keeper daily gas cost exceeds the ${filling ? 'filling' : 'steady-state'} budget of $${budgetUsd.toFixed(2)}.`);
     }
     await this.runs.heartbeat(ranAt);
     return { dryRun: false, poolCount: activePools.length, transactionHash: receipt.hash };
@@ -83,18 +86,20 @@ export class KeeperService {
       pools
         .filter((pool) => pool.observationAgeSeconds !== null && pool.observationAgeSeconds > OBSERVATION_ALERT_SECONDS)
         .map(async (pool) => {
-          if (await this.runs.claimAlert(`keeper-stale-${pool.id}`, this.now(), 3_600)) {
-            await this.sendAlert(`TWAP observation for ${pool.id} is ${pool.observationAgeSeconds}s old; stale at 900s.`);
+          const alertKey = `keeper-stale-${pool.id}`;
+          if (await this.runs.claimAlert(alertKey, this.now(), 3_600)) {
+            await this.sendAlert(alertKey, `TWAP observation for ${pool.id} is ${pool.observationAgeSeconds}s old; stale at 900s.`);
           }
         }),
     );
   }
 
-  private async sendAlert(message: string) {
+  private async sendAlert(alertKey: string, message: string) {
     try {
       await this.alerts.send(message);
     } catch (error) {
       console.error('Keeper alert delivery failed', error);
+      await this.runs.releaseAlert(alertKey);
     }
   }
 }

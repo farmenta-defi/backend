@@ -14,7 +14,7 @@ export interface KeeperConfig {
 
 export function readKeeperConfig(env = process.env): KeeperConfig {
   return {
-    databaseUrl: requiredUrl(env, 'DATABASE_URL'),
+    databaseUrl: requiredDatabaseUrl(env),
     indexerUrl: requiredUrl(env, 'INDEXER_URL'),
     rpcUrl: requiredUrl(env, 'RPC_URL'),
     privateKey: requiredHex(env, 'KEEPER_PRIVATE_KEY'),
@@ -30,6 +30,14 @@ function requiredUrl(env: NodeJS.ProcessEnv, name: string): string {
   const value = env[name];
   if (!value) throw new Error(`${name} is required`);
   return new URL(value).toString();
+}
+
+function requiredDatabaseUrl(env: NodeJS.ProcessEnv): string {
+  const databaseUrl = requiredUrl(env, 'DATABASE_URL');
+  if (new URL(databaseUrl).pathname !== '/farmenta') {
+    throw new Error('DATABASE_URL must target the farmenta database');
+  }
+  return databaseUrl;
 }
 
 function requiredAddress(env: NodeJS.ProcessEnv, name: string): Address {

@@ -2,6 +2,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import {
   createPublicClient,
   createWalletClient,
+  defineChain,
   http,
   type Address,
   type Account,
@@ -30,6 +31,12 @@ const recorderAbi = [{
   outputs: [],
 }] as const;
 const observationAbi = [{ type: 'function', name: 'observationCount', stateMutability: 'view', inputs: [{ name: 'poolId', type: 'bytes32' }], outputs: [{ type: 'uint16' }] }] as const;
+const robinhoodChain = defineChain({
+  id: 4_663,
+  name: 'Robinhood Chain',
+  nativeCurrency: { name: 'Robinhood', symbol: 'RBH', decimals: 18 },
+  rpcUrls: { default: { http: [] } },
+});
 
 export class ViemRecorderRepository implements RecorderRepository {
   private readonly publicClient: PublicClient;
@@ -43,9 +50,9 @@ export class ViemRecorderRepository implements RecorderRepository {
     private readonly multicallAddress: Address,
   ) {
     const transport = http(rpcUrl, { retryCount: 0 });
-    this.publicClient = createPublicClient({ transport });
+    this.publicClient = createPublicClient({ chain: robinhoodChain, transport });
     this.account = privateKeyToAccount(privateKey);
-    this.walletClient = createWalletClient({ account: this.account, chain: undefined, transport });
+    this.walletClient = createWalletClient({ account: this.account, chain: robinhoodChain, transport });
   }
 
   async debts(market: Address, tokenIds: bigint[]): Promise<bigint[]> {
@@ -67,7 +74,7 @@ export class ViemRecorderRepository implements RecorderRepository {
     }));
     const hash = await retryWithBackoff(() =>
       this.walletClient.writeContract({
-        chain: undefined,
+        chain: robinhoodChain,
         account: this.account,
         nonce,
         address: this.recorderAddress,

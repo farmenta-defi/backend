@@ -47,6 +47,10 @@ export class PostgresKeeperRunRepository implements KeeperRunRepository {
     return result.rowCount === 1;
   }
 
+  async releaseAlert(key: string): Promise<void> {
+    await this.pool.query('delete from backend.keeper_alert where alert_key = $1', [key]);
+  }
+
   async claimRunSlot(slot: number, at: number): Promise<boolean> {
     const result = await this.pool.query(
       `insert into backend.keeper_record_batch_slot (slot_at, claimed_at)
