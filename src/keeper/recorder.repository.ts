@@ -61,15 +61,22 @@ export class ViemRecorderRepository implements RecorderRepository {
   }
 
   async recordBatch(pools: PoolKey[]): Promise<RecordReceipt> {
-    return retryWithBackoff(async () => {
-      const hash = await this.walletClient.writeContract({
+    const nonce = await retryWithBackoff(() => this.publicClient.getTransactionCount({
+      address: this.account.address,
+      blockTag: 'pending',
+    }));
+    const hash = await retryWithBackoff(() =>
+      this.walletClient.writeContract({
         chain: undefined,
         account: this.account,
+        nonce,
         address: this.recorderAddress,
         abi: recorderAbi,
         functionName: 'recordBatch',
         args: [pools.map(({ currency0, currency1, fee, tickSpacing, hooks }) => ({ currency0, currency1, fee, tickSpacing, hooks }))],
-      });
+      }),
+    );
+    return retryWithBackoff(async () => {
       const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
       if (receipt.status !== 'success') throw new Error(`recordBatch transaction ${hash} reverted`);
       return { hash, gasUsed: receipt.gasUsed, gasPrice: receipt.effectiveGasPrice };

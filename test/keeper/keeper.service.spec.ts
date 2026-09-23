@@ -26,7 +26,7 @@ describe('KeeperService', () => {
       observationCounts: vi.fn().mockResolvedValue([0]),
       recordBatch: vi.fn().mockResolvedValue({ hash: '0xtransaction', gasUsed: 221_184n, gasPrice: 20_000_000n }),
     };
-    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn().mockResolvedValue(1) };
+    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn().mockResolvedValue(1), claimAlert: vi.fn().mockResolvedValue(true) };
     const alerts = { send: vi.fn() };
     const service = new KeeperService(indexer, chain, runs, alerts, () => 1_700_000_000);
 
@@ -47,7 +47,7 @@ describe('KeeperService', () => {
       pools: vi.fn().mockResolvedValue([pool]),
     };
     const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn(), recordBatch: vi.fn() };
-    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn() };
+    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn(), claimAlert: vi.fn() };
     const alerts = { send: vi.fn() };
     const service = new KeeperService(indexer, chain, runs, alerts, () => 1_700_000_000);
 

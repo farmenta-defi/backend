@@ -1,4 +1,5 @@
 import { TelegramAlertRepository } from './alert.repository.js';
+import { stringify } from 'viem';
 import { readKeeperConfig } from './keeper.config.js';
 import { HttpIndexerRepository } from './indexer.repository.js';
 import { KeeperService } from './keeper.service.js';
@@ -16,7 +17,7 @@ const service = new KeeperService(
 
 try {
   const result = await service.run({ dryRun: process.argv.includes('--dry-run') });
-  console.log(JSON.stringify(result, (_, value) => (typeof value === 'bigint' ? value.toString() : value)));
+  console.log(stringify(result));
 } finally {
   await runs.close();
 }

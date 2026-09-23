@@ -17,3 +17,8 @@ create table if not exists backend.service_heartbeat (
   service text primary key,
   observed_at timestamptz not null
 );
+
+create table if not exists backend.keeper_alert (
+  alert_key text primary key,
+  sent_at timestamptz not null
+);

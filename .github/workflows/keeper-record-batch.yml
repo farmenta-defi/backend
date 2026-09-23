@@ -13,6 +13,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: keeper-record-batch
+  cancel-in-progress: false
+
 jobs:
   record:
     runs-on: ubuntu-latest

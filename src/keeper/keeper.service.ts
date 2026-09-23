@@ -21,7 +21,7 @@ export class KeeperService {
     await this.indexer.assertFresh();
     const [candidates, pools] = await Promise.all([this.indexer.candidates(), this.indexer.pools()]);
     const activePoolIds = await this.activePoolIds(candidates);
-    const activePools = pools.filter((pool) => activePoolIds.has(pool.id) && isRecordable(pool));
+    const activePools = pools.filter((pool) => activePoolIds.has(pool.id));
 
     await this.alertStalePools(activePools);
 
@@ -43,7 +43,8 @@ export class KeeperService {
       budgetUsd,
       transactionHash: receipt.hash,
     });
-    if (await this.runs.dailyCostUsd() > budgetUsd) {
+    const budgetAlertKey = `keeper-budget-${new Date(ranAt * 1_000).toISOString().slice(0, 10)}`;
+    if (await this.runs.dailyCostUsd() > budgetUsd && await this.runs.claimAlert(budgetAlertKey, ranAt, 86_400)) {
       await this.alerts.send(`Keeper daily gas cost exceeds the ${filling ? 'filling' : 'steady-state'} budget of $${budgetUsd.toFixed(2)}.`);
     }
     await this.runs.heartbeat(ranAt);
@@ -73,15 +74,11 @@ export class KeeperService {
     await Promise.all(
       pools
         .filter((pool) => pool.observationAgeSeconds !== null && pool.observationAgeSeconds > OBSERVATION_ALERT_SECONDS)
-        .map((pool) =>
-          this.alerts.send(
-            `TWAP observation for ${pool.id} is ${pool.observationAgeSeconds}s old; stale at 900s.`,
-          ),
-        ),
+        .map(async (pool) => {
+          if (await this.runs.claimAlert(`keeper-stale-${pool.id}`, this.now(), 3_600)) {
+            await this.alerts.send(`TWAP observation for ${pool.id} is ${pool.observationAgeSeconds}s old; stale at 900s.`);
+          }
+        }),
     );
   }
-}
-
-function isRecordable(pool: PoolKey): boolean {
-  return pool.currency0 !== undefined && pool.currency1 !== undefined;
 }

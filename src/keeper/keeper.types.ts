@@ -47,6 +47,7 @@ export interface RecorderRepository {
 export interface KeeperRunRepository {
   save(run: KeeperRun): Promise<void>;
   dailyCostUsd(): Promise<number>;
+  claimAlert(key: string, at: number, reminderSeconds: number): Promise<boolean>;
   heartbeat(at: number): Promise<void>;
 }
 

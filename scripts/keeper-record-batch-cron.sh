@@ -2,4 +2,4 @@
 set -eu
 
 cd "$(dirname "$0")/.."
-exec bun run src/keeper/run.ts
+exec flock -n /tmp/farmenta-keeper-record-batch.lock bun run src/keeper/run.ts

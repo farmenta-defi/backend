@@ -35,6 +35,18 @@ export class PostgresKeeperRunRepository implements KeeperRunRepository {
     return Number(result.rows[0].cost);
   }
 
+  async claimAlert(key: string, at: number, reminderSeconds: number): Promise<boolean> {
+    const result = await this.pool.query(
+      `insert into backend.keeper_alert (alert_key, sent_at)
+       values ($1, to_timestamp($2))
+       on conflict (alert_key) do update set sent_at = excluded.sent_at
+       where backend.keeper_alert.sent_at <= to_timestamp($2 - $3)
+       returning alert_key`,
+      [key, at, reminderSeconds],
+    );
+    return result.rowCount === 1;
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }
