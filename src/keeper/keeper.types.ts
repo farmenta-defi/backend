@@ -48,6 +48,8 @@ export interface KeeperRunRepository {
   save(run: KeeperRun): Promise<void>;
   dailyCostUsd(): Promise<number>;
   claimAlert(key: string, at: number, reminderSeconds: number): Promise<boolean>;
+  claimRunSlot(slot: number, at: number): Promise<boolean>;
+  completeRunSlot(slot: number, transactionHash: string): Promise<void>;
   heartbeat(at: number): Promise<void>;
 }
 

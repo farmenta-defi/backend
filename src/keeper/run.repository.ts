@@ -47,6 +47,28 @@ export class PostgresKeeperRunRepository implements KeeperRunRepository {
     return result.rowCount === 1;
   }
 
+  async claimRunSlot(slot: number, at: number): Promise<boolean> {
+    const result = await this.pool.query(
+      `insert into backend.keeper_record_batch_slot (slot_at, claimed_at)
+       values (to_timestamp($1), to_timestamp($2))
+       on conflict (slot_at) do update set claimed_at = excluded.claimed_at
+       where backend.keeper_record_batch_slot.transaction_hash is null
+         and backend.keeper_record_batch_slot.claimed_at <= to_timestamp($2 - 240)
+       returning slot_at`,
+      [slot, at],
+    );
+    return result.rowCount === 1;
+  }
+
+  async completeRunSlot(slot: number, transactionHash: string): Promise<void> {
+    await this.pool.query(
+      `update backend.keeper_record_batch_slot
+       set transaction_hash = $2
+       where slot_at = to_timestamp($1)`,
+      [slot, transactionHash],
+    );
+  }
+
   async close(): Promise<void> {
     await this.pool.end();
   }

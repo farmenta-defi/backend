@@ -25,15 +25,22 @@ export class KeeperService {
 
     await this.alertStalePools(activePools);
 
-    if (dryRun || activePools.length === 0) {
+    if (dryRun) {
       return { dryRun, poolCount: activePools.length, pools: activePools };
+    }
+
+    const ranAt = this.now();
+    const slot = Math.floor(ranAt / 300) * 300;
+    if (!await this.runs.claimRunSlot(slot, ranAt)) return { dryRun: false, poolCount: activePools.length, skipped: true };
+    if (activePools.length === 0) {
+      await this.runs.heartbeat(ranAt);
+      return { dryRun: false, poolCount: 0 };
     }
 
     const observationCounts = await this.recorder.observationCounts(activePools.map((pool) => pool.id));
     const filling = observationCounts.some((count) => count < 2_048);
     const budgetUsd = (filling ? 3.3 : 2.1) * (activePools.length / 5);
     const receipt = await this.recorder.recordBatch(activePools);
-    const ranAt = this.now();
     const gasCostUsd = Number(receipt.gasUsed * receipt.gasPrice) / 1e18 * 2_400;
     await this.runs.save({
       ranAt,
@@ -43,9 +50,10 @@ export class KeeperService {
       budgetUsd,
       transactionHash: receipt.hash,
     });
+    await this.runs.completeRunSlot(slot, receipt.hash);
     const budgetAlertKey = `keeper-budget-${new Date(ranAt * 1_000).toISOString().slice(0, 10)}`;
     if (await this.runs.dailyCostUsd() > budgetUsd && await this.runs.claimAlert(budgetAlertKey, ranAt, 86_400)) {
-      await this.alerts.send(`Keeper daily gas cost exceeds the ${filling ? 'filling' : 'steady-state'} budget of $${budgetUsd.toFixed(2)}.`);
+      await this.sendAlert(`Keeper daily gas cost exceeds the ${filling ? 'filling' : 'steady-state'} budget of $${budgetUsd.toFixed(2)}.`);
     }
     await this.runs.heartbeat(ranAt);
     return { dryRun: false, poolCount: activePools.length, transactionHash: receipt.hash };
@@ -76,9 +84,17 @@ export class KeeperService {
         .filter((pool) => pool.observationAgeSeconds !== null && pool.observationAgeSeconds > OBSERVATION_ALERT_SECONDS)
         .map(async (pool) => {
           if (await this.runs.claimAlert(`keeper-stale-${pool.id}`, this.now(), 3_600)) {
-            await this.alerts.send(`TWAP observation for ${pool.id} is ${pool.observationAgeSeconds}s old; stale at 900s.`);
+            await this.sendAlert(`TWAP observation for ${pool.id} is ${pool.observationAgeSeconds}s old; stale at 900s.`);
           }
         }),
     );
+  }
+
+  private async sendAlert(message: string) {
+    try {
+      await this.alerts.send(message);
+    } catch (error) {
+      console.error('Keeper alert delivery failed', error);
+    }
   }
 }

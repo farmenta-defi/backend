@@ -22,3 +22,9 @@ create table if not exists backend.keeper_alert (
   alert_key text primary key,
   sent_at timestamptz not null
 );
+
+create table if not exists backend.keeper_record_batch_slot (
+  slot_at timestamptz primary key,
+  claimed_at timestamptz not null,
+  transaction_hash text unique
+);
