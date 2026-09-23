@@ -24,9 +24,10 @@ describe('KeeperService', () => {
     const chain = {
       debts: vi.fn().mockResolvedValue([10n, 0n]),
       observationCounts: vi.fn().mockResolvedValue([0]),
-      recordBatch: vi.fn().mockResolvedValue({ hash: '0xtransaction', gasUsed: 221_184n, gasPrice: 20_000_000n }),
+      submitBatch: vi.fn().mockResolvedValue('0xtransaction'),
+      waitForReceipt: vi.fn().mockResolvedValue({ hash: '0xtransaction', gasUsed: 221_184n, gasPrice: 20_000_000n }),
     };
-    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn().mockResolvedValue(1), claimAlert: vi.fn().mockResolvedValue(true), releaseAlert: vi.fn(), claimRunSlot: vi.fn().mockResolvedValue(true), completeRunSlot: vi.fn() };
+    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn().mockResolvedValue(1), claimAlert: vi.fn().mockResolvedValue(true), releaseAlert: vi.fn(), claimRunSlot: vi.fn().mockResolvedValue(true), markRunSlotSubmitted: vi.fn(), completeRunSlot: vi.fn() };
     const alerts = { send: vi.fn() };
     const service = new KeeperService(indexer, chain, runs, alerts, () => 1_700_000_000);
 
@@ -34,7 +35,7 @@ describe('KeeperService', () => {
       poolCount: 1,
       transactionHash: '0xtransaction',
     });
-    expect(chain.recordBatch).toHaveBeenCalledWith([pool]);
+    expect(chain.submitBatch).toHaveBeenCalledWith([pool]);
     expect(alerts.send).toHaveBeenCalledWith(expect.stringContaining(pool.id));
     expect(runs.save).toHaveBeenCalledWith(expect.objectContaining({ gasUsed: 221_184n }));
     expect(runs.heartbeat).toHaveBeenCalledOnce();
@@ -46,13 +47,28 @@ describe('KeeperService', () => {
       candidates: vi.fn().mockResolvedValue([{ market: '0x0000000000000000000000000000000000000003', tokenId: 1n, poolId: pool.id }]),
       pools: vi.fn().mockResolvedValue([pool]),
     };
-    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn(), recordBatch: vi.fn() };
-    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn(), claimAlert: vi.fn(), releaseAlert: vi.fn(), claimRunSlot: vi.fn(), completeRunSlot: vi.fn() };
+    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn(), submitBatch: vi.fn(), waitForReceipt: vi.fn() };
+    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn(), claimAlert: vi.fn(), releaseAlert: vi.fn(), claimRunSlot: vi.fn(), markRunSlotSubmitted: vi.fn(), completeRunSlot: vi.fn() };
     const alerts = { send: vi.fn() };
     const service = new KeeperService(indexer, chain, runs, alerts, () => 1_700_000_000);
 
     await expect(service.run({ dryRun: true })).resolves.toMatchObject({ poolCount: 1, dryRun: true });
-    expect(chain.recordBatch).not.toHaveBeenCalled();
+    expect(chain.submitBatch).not.toHaveBeenCalled();
     expect(runs.save).not.toHaveBeenCalled();
+  });
+
+  it('does not submit a duplicate batch when another scheduler owns the slot', async () => {
+    const indexer = {
+      assertFresh: vi.fn(),
+      candidates: vi.fn().mockResolvedValue([{ market: '0x0000000000000000000000000000000000000003', tokenId: 1n, poolId: pool.id }]),
+      pools: vi.fn().mockResolvedValue([pool]),
+    };
+    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn(), submitBatch: vi.fn(), waitForReceipt: vi.fn() };
+    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn(), claimAlert: vi.fn(), releaseAlert: vi.fn(), claimRunSlot: vi.fn().mockResolvedValue(false), markRunSlotSubmitted: vi.fn(), completeRunSlot: vi.fn() };
+    const service = new KeeperService(indexer, chain, runs, { send: vi.fn() }, () => 1_700_000_000);
+
+    await expect(service.run({ dryRun: false })).resolves.toMatchObject({ skipped: true });
+    expect(chain.submitBatch).not.toHaveBeenCalled();
+    expect(runs.heartbeat).toHaveBeenCalledOnce();
   });
 });

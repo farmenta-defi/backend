@@ -41,7 +41,8 @@ export interface IndexerRepository {
 export interface RecorderRepository {
   debts(market: Address, tokenIds: bigint[]): Promise<bigint[]>;
   observationCounts(poolIds: PoolId[]): Promise<number[]>;
-  recordBatch(pools: PoolKey[]): Promise<RecordReceipt>;
+  submitBatch(pools: PoolKey[]): Promise<string>;
+  waitForReceipt(hash: string): Promise<RecordReceipt>;
 }
 
 export interface KeeperRunRepository {
@@ -50,6 +51,7 @@ export interface KeeperRunRepository {
   claimAlert(key: string, at: number, reminderSeconds: number): Promise<boolean>;
   releaseAlert(key: string): Promise<void>;
   claimRunSlot(slot: number, at: number): Promise<boolean>;
+  markRunSlotSubmitted(slot: number, transactionHash: string): Promise<void>;
   completeRunSlot(slot: number, transactionHash: string): Promise<void>;
   heartbeat(at: number): Promise<void>;
 }

@@ -67,7 +67,7 @@ export class ViemRecorderRepository implements RecorderRepository {
     });
   }
 
-  async recordBatch(pools: PoolKey[]): Promise<RecordReceipt> {
+  async submitBatch(pools: PoolKey[]): Promise<string> {
     const nonce = await retryWithBackoff(() => this.publicClient.getTransactionCount({
       address: this.account.address,
       blockTag: 'pending',
@@ -83,8 +83,12 @@ export class ViemRecorderRepository implements RecorderRepository {
         args: [pools.map(({ currency0, currency1, fee, tickSpacing, hooks }) => ({ currency0, currency1, fee, tickSpacing, hooks }))],
       }),
     );
+    return hash;
+  }
+
+  async waitForReceipt(hash: string): Promise<RecordReceipt> {
     return retryWithBackoff(async () => {
-      const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+      const receipt = await this.publicClient.waitForTransactionReceipt({ hash: hash as Hex, timeout: 90_000 });
       if (receipt.status !== 'success') throw new Error(`recordBatch transaction ${hash} reverted`);
       return { hash, gasUsed: receipt.gasUsed, gasPrice: receipt.effectiveGasPrice };
     });

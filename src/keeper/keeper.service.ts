@@ -41,9 +41,15 @@ export class KeeperService {
     }
 
     const observationCounts = await this.recorder.observationCounts(activePools.map((pool) => pool.id));
-    const filling = observationCounts.some((count) => count < 2_048);
-    const budgetUsd = (filling ? 3.3 : 2.1) * (activePools.length / 5);
-    const receipt = await this.recorder.recordBatch(activePools);
+    const fillingCount = observationCounts.filter((count) => count < 2_048).length;
+    const budgetUsd = observationCounts.reduce(
+      (total, count) => total + (count < 2_048 ? 3.3 : 2.1) / 5,
+      0,
+    );
+    await this.indexer.assertFresh();
+    const transactionHash = await this.recorder.submitBatch(activePools);
+    await this.runs.markRunSlotSubmitted(slot, transactionHash);
+    const receipt = await this.recorder.waitForReceipt(transactionHash);
     const gasCostUsd = Number(receipt.gasUsed * receipt.gasPrice) / 1e18 * 2_400;
     await this.runs.save({
       ranAt,
@@ -56,7 +62,8 @@ export class KeeperService {
     await this.runs.completeRunSlot(slot, receipt.hash);
     const budgetAlertKey = `keeper-budget-${new Date(ranAt * 1_000).toISOString().slice(0, 10)}`;
     if (await this.runs.dailyCostUsd() > budgetUsd && await this.runs.claimAlert(budgetAlertKey, ranAt, 86_400)) {
-      await this.sendAlert(budgetAlertKey, `Keeper daily gas cost exceeds the ${filling ? 'filling' : 'steady-state'} budget of $${budgetUsd.toFixed(2)}.`);
+      const phase = fillingCount === 0 ? 'steady-state' : fillingCount === activePools.length ? 'filling' : 'mixed';
+      await this.sendAlert(budgetAlertKey, `Keeper daily gas cost exceeds the ${phase} budget of $${budgetUsd.toFixed(2)}.`);
     }
     await this.runs.heartbeat(ranAt);
     return { dryRun: false, poolCount: activePools.length, transactionHash: receipt.hash };
