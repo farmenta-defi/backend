@@ -31,22 +31,23 @@ export class KeeperService {
 
     const ranAt = this.now();
     const slot = Math.floor(ranAt / 300) * 300;
-    if (!await this.runs.claimRunSlot(slot, ranAt)) {
-      await this.runs.heartbeat(ranAt);
-      return { dryRun: false, poolCount: activePools.length, skipped: true };
-    }
     if (activePools.length === 0) {
+      if (!await this.runs.claimRunSlot(slot, ranAt)) {
+        await this.runs.heartbeat(ranAt);
+        return { dryRun: false, poolCount: 0, skipped: true };
+      }
       await this.runs.heartbeat(ranAt);
       return { dryRun: false, poolCount: 0 };
     }
 
     const observationCounts = await this.recorder.observationCounts(activePools.map((pool) => pool.id));
     const fillingCount = observationCounts.filter((count) => count < 2_048).length;
-    const budgetUsd = observationCounts.reduce(
-      (total, count) => total + (count < 2_048 ? 3.3 : 2.1) / 5,
-      0,
-    );
+    const budgetUsd = fillingCount === 0 ? 2.1 : 3.3;
     await this.indexer.assertFresh();
+    if (!await this.runs.claimRunSlot(slot, ranAt)) {
+      await this.runs.heartbeat(ranAt);
+      return { dryRun: false, poolCount: activePools.length, skipped: true };
+    }
     const transactionHash = await this.recorder.submitBatch(activePools);
     await this.runs.markRunSlotSubmitted(slot, transactionHash);
     const receipt = await this.recorder.waitForReceipt(transactionHash);

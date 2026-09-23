@@ -47,7 +47,7 @@ describe('KeeperService', () => {
       candidates: vi.fn().mockResolvedValue([{ market: '0x0000000000000000000000000000000000000003', tokenId: 1n, poolId: pool.id }]),
       pools: vi.fn().mockResolvedValue([pool]),
     };
-    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn(), submitBatch: vi.fn(), waitForReceipt: vi.fn() };
+    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn().mockResolvedValue([0]), submitBatch: vi.fn(), waitForReceipt: vi.fn() };
     const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn(), claimAlert: vi.fn(), releaseAlert: vi.fn(), claimRunSlot: vi.fn(), markRunSlotSubmitted: vi.fn(), completeRunSlot: vi.fn() };
     const alerts = { send: vi.fn() };
     const service = new KeeperService(indexer, chain, runs, alerts, () => 1_700_000_000);
@@ -63,12 +63,26 @@ describe('KeeperService', () => {
       candidates: vi.fn().mockResolvedValue([{ market: '0x0000000000000000000000000000000000000003', tokenId: 1n, poolId: pool.id }]),
       pools: vi.fn().mockResolvedValue([pool]),
     };
-    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn(), submitBatch: vi.fn(), waitForReceipt: vi.fn() };
+    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn().mockResolvedValue([0]), submitBatch: vi.fn(), waitForReceipt: vi.fn() };
     const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn(), claimAlert: vi.fn(), releaseAlert: vi.fn(), claimRunSlot: vi.fn().mockResolvedValue(false), markRunSlotSubmitted: vi.fn(), completeRunSlot: vi.fn() };
     const service = new KeeperService(indexer, chain, runs, { send: vi.fn() }, () => 1_700_000_000);
 
     await expect(service.run({ dryRun: false })).resolves.toMatchObject({ skipped: true });
     expect(chain.submitBatch).not.toHaveBeenCalled();
     expect(runs.heartbeat).toHaveBeenCalledOnce();
+  });
+
+  it('does not claim a slot before fallible pre-broadcast reads succeed', async () => {
+    const indexer = {
+      assertFresh: vi.fn(),
+      candidates: vi.fn().mockResolvedValue([{ market: '0x0000000000000000000000000000000000000003', tokenId: 1n, poolId: pool.id }]),
+      pools: vi.fn().mockResolvedValue([pool]),
+    };
+    const chain = { debts: vi.fn().mockResolvedValue([1n]), observationCounts: vi.fn().mockRejectedValue(new Error('rate limited')), submitBatch: vi.fn(), waitForReceipt: vi.fn() };
+    const runs = { save: vi.fn(), heartbeat: vi.fn(), dailyCostUsd: vi.fn(), claimAlert: vi.fn(), releaseAlert: vi.fn(), claimRunSlot: vi.fn(), markRunSlotSubmitted: vi.fn(), completeRunSlot: vi.fn() };
+    const service = new KeeperService(indexer, chain, runs, { send: vi.fn() }, () => 1_700_000_000);
+
+    await expect(service.run({ dryRun: false })).rejects.toThrow('rate limited');
+    expect(runs.claimRunSlot).not.toHaveBeenCalled();
   });
 });
