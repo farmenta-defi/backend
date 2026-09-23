@@ -25,6 +25,32 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## TWAP keeper
+
+`bun run keeper:record` runs the permissionless `TwapRecorder.recordBatch` keeper. It first
+checks Ponder's `/status`, reads `/loans/keeper-candidates` and `/pools`, then confirms every
+candidate's `debtOf(tokenId)` through Multicall3. Only meme pools with a positive current debt
+are included in one transaction. `bun run keeper:dry-run` follows the same read path and prints
+the exact batch without broadcasting it.
+
+Run `migrations/0001_keeper_record_batch.sql` before enabling it. Each sent transaction records
+its gas use and USD estimate in `backend.keeper_record_batch_run`; `backend.service_heartbeat`
+is updated only after a successful run, for the FAR-36 watchdog. Gas alerts use the filling
+budget ($3.30/day for five pools) while any pool has fewer than 2,048 observations, and the
+steady-state budget ($2.10/day) only after every buffer has filled.
+
+The VPS scheduler runs this command every five minutes from a dedicated Unix user and
+low-balance wallet:
+
+```cron
+*/5 * * * * /path/to/backend/scripts/keeper-record-batch-cron.sh
+```
+
+The GitHub Actions workflow is a separately funded backup and uses
+`KEEPER_BACKUP_PRIVATE_KEY`; it must never reuse the VPS wallet, avoiding nonce collisions.
+Its `schedule` trigger remains operationally blocked on FAR-29, so Telegram's 600-second
+observation alert and the heartbeat watchdog remain mandatory until that is fixed.
+
 ## Project setup
 
 ```bash
