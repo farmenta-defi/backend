@@ -1,0 +1,33 @@
+name: Keeper record batch
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Print the transaction instead of broadcasting it
+        required: false
+        default: false
+        type: boolean
+
+permissions: {}
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    env:
+      DATABASE_URL: ${{ secrets.KEEPER_DATABASE_URL }}
+      INDEXER_URL: ${{ secrets.KEEPER_INDEXER_URL }}
+      RPC_URL: ${{ secrets.KEEPER_RPC_URL }}
+      KEEPER_PRIVATE_KEY: ${{ secrets.KEEPER_BACKUP_PRIVATE_KEY }}
+      TWAP_RECORDER_ADDRESS: ${{ secrets.TWAP_RECORDER_ADDRESS }}
+      MULTICALL3_ADDRESS: ${{ secrets.MULTICALL3_ADDRESS }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run src/keeper/run.ts ${{ inputs.dry_run && '--dry-run' || '' }}
