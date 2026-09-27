@@ -1,5 +1,5 @@
-create schema if not exists backend;
-
+-- Schema backend comes from scripts/create-db-role.sql. Creating it here needs CREATE on the
+-- database even when it already exists, and farmenta_backend does not have that privilege.
 create table if not exists backend.hf_snapshot (
   market text not null,
   token_id numeric(78, 0) not null,

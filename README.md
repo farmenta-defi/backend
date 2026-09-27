@@ -14,7 +14,7 @@ role as a PostgreSQL superuser:
 
 ```sh
 psql -U postgres -d farmenta -f scripts/create-db-role.sql
-psql -U postgres -c '\\password farmenta_backend'
+psql -U postgres -c '\password farmenta_backend'
 ```
 
 Start the indexer once before this step so Ponder has created schema `ponder`; the provisioning

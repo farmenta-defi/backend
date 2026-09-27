@@ -1,7 +1,7 @@
-\\set ON_ERROR_STOP on
+\set ON_ERROR_STOP on
 -- Run after the indexer's Ponder schema has been initialized, as a Postgres superuser.
 -- Set the password interactively afterwards:
--- psql -U postgres -c '\\password farmenta_backend'
+-- psql -U postgres -c '\password farmenta_backend'
 do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'farmenta_backend') then
@@ -10,7 +10,14 @@ begin
 end
 $$;
 grant connect on database farmenta to farmenta_backend;
-revoke connect on database lpmon from farmenta_backend;
+-- lpmon only exists on the shared VPS server; a development machine has nothing to revoke.
+do $$
+begin
+  if exists (select 1 from pg_database where datname = 'lpmon') then
+    revoke connect on database lpmon from farmenta_backend;
+  end if;
+end
+$$;
 
 -- Application data lives in its own schema. The backend may not mutate Ponder/indexer data.
 create schema if not exists backend authorization farmenta_backend;
