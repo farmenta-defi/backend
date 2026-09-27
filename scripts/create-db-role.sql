@@ -1,7 +1,7 @@
-\\set ON_ERROR_STOP on
+\set ON_ERROR_STOP on
 -- Run after the indexer's Ponder schema has been initialized, as a Postgres superuser.
 -- Set the password interactively afterwards:
--- psql -U postgres -c '\\password farmenta_backend'
+-- psql -U postgres -c '\password farmenta_backend'
 do $$
 begin
   if not exists (select 1 from pg_roles where rolname = 'farmenta_backend') then
