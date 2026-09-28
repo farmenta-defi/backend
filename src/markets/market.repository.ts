@@ -19,6 +19,7 @@ export type HealthFactorRow = {
   market: string;
   tokenId: string;
   healthFactor: string | null;
+  debtUsdg: string | null;
   debtUsd: string | null;
   poolId: string | null;
   borrower: string | null;
@@ -62,13 +63,14 @@ export class MarketRepository implements OnModuleDestroy {
     if (rows.length === 0) return;
     const values: unknown[] = [];
     const tuples = rows.map((row, index) => {
-      const offset = index * 13;
+      const offset = index * 14;
       values.push(
         row.market,
         row.tokenId,
         row.healthFactor,
         observedAt,
         blockNumber.toString(),
+        row.debtUsdg,
         row.debtUsd,
         row.poolId,
         row.borrower,
@@ -78,10 +80,10 @@ export class MarketRepository implements OnModuleDestroy {
         row.status,
         row.error,
       );
-      return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8},$${offset + 9},$${offset + 10},$${offset + 11},$${offset + 12},$${offset + 13})`;
+      return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8},$${offset + 9},$${offset + 10},$${offset + 11},$${offset + 12},$${offset + 13},$${offset + 14})`;
     });
     await this.pool.query(
-      `insert into backend.hf_snapshot (market,token_id,health_factor,observed_at,block_number,debt_usd,pool_id,borrower,threshold_bps,bonus_bps,ramp_active,status,error) values ${tuples.join(',')}`,
+      `insert into backend.hf_snapshot (market,token_id,health_factor,observed_at,block_number,debt_usdg,debt_usd,pool_id,borrower,threshold_bps,bonus_bps,ramp_active,status,error) values ${tuples.join(',')}`,
       values,
     );
   }
@@ -93,7 +95,7 @@ export class MarketRepository implements OnModuleDestroy {
         observedAt: Date;
       }
     >(
-      `with latest as (select max(observed_at) observed_at from backend.hf_snapshot) select market, token_id::text as "tokenId", health_factor::text as "healthFactor", debt_usd::text as "debtUsd", pool_id as "poolId", borrower, threshold_bps as "thresholdBps", bonus_bps as "bonusBps", ramp_active as "rampActive", status, error, block_number::text as "blockNumber", observed_at as "observedAt" from backend.hf_snapshot where observed_at = (select observed_at from latest) order by health_factor asc nulls last, token_id asc`,
+      `with latest as (select max(observed_at) observed_at from backend.hf_snapshot) select market, token_id::text as "tokenId", health_factor::text as "healthFactor", debt_usdg::text as "debtUsdg", debt_usd::text as "debtUsd", pool_id as "poolId", borrower, threshold_bps as "thresholdBps", bonus_bps as "bonusBps", ramp_active as "rampActive", status, error, block_number::text as "blockNumber", observed_at as "observedAt" from backend.hf_snapshot where observed_at = (select observed_at from latest) order by health_factor asc nulls last, token_id asc`,
     );
     return rows;
   }

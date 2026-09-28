@@ -64,11 +64,12 @@ database on the shared Postgres server.
 ## Liquidation snapshots
 
 The backend refreshes health-factor snapshots every 30 seconds. Each cycle reads the in-custody
-loans from the indexer and pins `liquidationHealthFactor`, `debtOf`, and pool terms to one chain
-block. Multicall uses `allowFailure`; a failed position is retained with `status: error` and does
-not discard other positions. `/liquidations` returns the latest debt-bearing positions ordered by
-health factor and sets `stale: true` when the snapshot is older than 90 seconds. Snapshot
-completion updates the `backend-hf-snapshot` heartbeat.
+loans from the indexer and pins `liquidationHealthFactor`, `debtOf`, oracle pricing, and pool terms
+to one chain block. USDG debt and its USD value (1e18 units) are both stored. Multicall uses
+`allowFailure`; a failed position is retained with `status: error` and does not discard other
+positions. `/liquidations` returns the latest debt-bearing positions ordered by health factor and
+sets `stale: true` when the snapshot is older than 90 seconds. Snapshot completion updates the
+`backend-hf-snapshot` heartbeat.
 
 Multicall is split into batches of at most 100 view calls (up to 50 positions before pool-term
 reads), all pinned to the same block. This is a conservative initial RPC budget, not a verified

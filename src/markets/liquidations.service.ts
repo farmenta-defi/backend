@@ -10,6 +10,7 @@ import { RpcService } from '../rpc/rpc.service.js';
 import {
   lensAbi,
   marketAbi,
+  oracleAbi,
   policyAbi,
   policyEffectiveLtAbi,
 } from './contracts.js';
@@ -27,6 +28,7 @@ type Pool = { id: string; currency0: string | null; currency1: string | null };
 type MulticallResult =
   | { status: 'success'; result: unknown }
   | { status: 'failure'; error?: unknown };
+type OracleValues = { price: bigint; decimals: bigint };
 type Listing = {
   ltStartBps: bigint;
   ltTargetBps: bigint;
@@ -68,7 +70,7 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
       Date.now() - new Date(snapshotAt).getTime() > STALE_AFTER_MS;
     const queue = rows
       .filter(
-        (row) => row.status !== 'error' && BigInt(row.debtUsd ?? '0') > 0n,
+        (row) => row.status !== 'error' && BigInt(row.debtUsdg ?? '0') > 0n,
       )
       .map((row) => ({
         id: row.tokenId,
@@ -76,6 +78,7 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
         borrower: row.borrower,
         collateral: row.poolId,
         debtUsd: row.debtUsd,
+        debtUsdg: row.debtUsdg,
         healthFactor: row.healthFactor,
         threshold: row.thresholdBps === null ? null : row.thresholdBps / 10_000,
         bonus: row.bonusBps === null ? null : row.bonusBps / 10_000,
@@ -170,6 +173,53 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
     blockNumber: bigint,
     observedAt: Date,
   ): Promise<HealthFactorRow[]> {
+    if (loans.length === 0) return [];
+    const config = (await this.rpc.multicall(
+      [
+        { address: market, abi: marketAbi, functionName: 'asset' },
+        { address: market, abi: marketAbi, functionName: 'oracle' },
+      ],
+      blockNumber,
+    )) as MulticallResult[];
+    if (config[0]?.status !== 'success' || config[1]?.status !== 'success')
+      return loans.map((loan) =>
+        errorRow(
+          market,
+          loan,
+          poolNames.get(loan.poolId.toLowerCase()) ?? loan.poolId,
+        ),
+      );
+    const asset = config[0].result as Address;
+    const oracle = config[1].result as Address;
+    const prices = (await this.rpc.multicall(
+      [
+        {
+          address: oracle,
+          abi: oracleAbi,
+          functionName: 'priceForLiquidation',
+          args: [asset],
+        },
+        {
+          address: oracle,
+          abi: oracleAbi,
+          functionName: 'decimals',
+          args: [asset],
+        },
+      ],
+      blockNumber,
+    )) as MulticallResult[];
+    if (prices[0]?.status !== 'success' || prices[1]?.status !== 'success')
+      return loans.map((loan) =>
+        errorRow(
+          market,
+          loan,
+          poolNames.get(loan.poolId.toLowerCase()) ?? loan.poolId,
+        ),
+      );
+    const oracleValues: OracleValues = {
+      price: prices[0].result as bigint,
+      decimals: prices[1].result as bigint,
+    };
     const pools = [...new Set(loans.map((loan) => loan.poolId.toLowerCase()))];
     const calls = [
       ...loans.flatMap((loan) => [
@@ -241,9 +291,11 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
         );
       }
       const healthFactor = BigInt(hf.result as bigint);
-      const debtUsd = BigInt(debt.result as bigint);
+      const debtUsdg = BigInt(debt.result as bigint);
+      const debtUsd =
+        (debtUsdg * oracleValues.price) / 10n ** oracleValues.decimals;
       const status =
-        debtUsd === 0n
+        debtUsdg === 0n
           ? 'healthy'
           : healthFactor < 10n ** 18n
             ? 'liquidatable'
@@ -256,6 +308,7 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
         market,
         tokenId: loan.tokenId,
         healthFactor: healthFactor.toString(),
+        debtUsdg: debtUsdg.toString(),
         debtUsd: debtUsd.toString(),
         poolId: poolNames.get(loan.poolId.toLowerCase()) ?? loan.poolId,
         borrower: loan.owner,
@@ -274,6 +327,7 @@ function errorRow(market: string, loan: Loan, poolId: string): HealthFactorRow {
     market,
     tokenId: loan.tokenId,
     healthFactor: null,
+    debtUsdg: null,
     debtUsd: null,
     poolId,
     borrower: loan.owner,

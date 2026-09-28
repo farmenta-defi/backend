@@ -36,6 +36,20 @@ export const marketAbi = [
   },
   {
     type: 'function',
+    name: 'asset',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+  {
+    type: 'function',
+    name: 'oracle',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'address' }],
+  },
+  {
+    type: 'function',
     name: 'balanceOf',
     stateMutability: 'view',
     inputs: [{ type: 'address' }],
@@ -74,6 +88,22 @@ export const marketAbi = [
     name: 'tier',
     stateMutability: 'view',
     inputs: [],
+    outputs: [{ type: 'uint8' }],
+  },
+] as const;
+export const oracleAbi = [
+  {
+    type: 'function',
+    name: 'priceForLiquidation',
+    stateMutability: 'view',
+    inputs: [{ type: 'address' }],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'decimals',
+    stateMutability: 'view',
+    inputs: [{ type: 'address' }],
     outputs: [{ type: 'uint8' }],
   },
 ] as const;
