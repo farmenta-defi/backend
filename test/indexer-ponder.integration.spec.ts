@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import * as schema from '../ponder.schema.ts';
 import { ActivityService } from '../src/activity/activity.service.js';
 import { MarketsService } from '../src/markets/markets.service.js';
@@ -10,10 +11,15 @@ import {
 } from './support/ponder-graphql.js';
 
 const owner = '0x00000000000000000000000000000000000000aa';
-const marketAddresses = [
-  '0x0000000000000000000000000000000000000001',
-  '0x0000000000000000000000000000000000000002',
-];
+const deployment = JSON.parse(
+  readFileSync(
+    new URL('./fixtures/two-market-deployment.json', import.meta.url),
+    'utf8',
+  ),
+) as { markets: Record<string, { address: string }> };
+const marketAddresses = Object.values(deployment.markets).map(
+  ({ address }) => address,
+);
 const poolId = `0x${'a'.repeat(64)}`;
 const activeIndexers: PonderIndexer[] = [];
 
@@ -95,13 +101,7 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
           }));
       return [];
     });
-    const deployments = {
-      all: () =>
-        marketAddresses.map((address, index) => [
-          index ? 'meme' : 'blueChip',
-          { address },
-        ]),
-    };
+    const deployments = { all: () => Object.entries(deployment.markets) };
     const service = new ActivityService(
       indexer.indexer as never,
       deployments as never,
