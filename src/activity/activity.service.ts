@@ -16,6 +16,7 @@ export class ActivityService {
   async activity(address: string, limit = 25, cursor?: string) {
     if (!isAddress(address) || /^0x0{40}$/i.test(address)) throw new BadRequestException('address must be a non-zero address');
     if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new BadRequestException('limit must be between 1 and 100');
+    if (cursor && !isCursor(cursor)) throw new BadRequestException('cursor must be timestamp:blockNumber:logIndex');
     return this.cache.get(`activity:${address.toLowerCase()}:${limit}:${cursor ?? ''}`, async () => {
       const data = await this.indexer.query<ActivityData>(ACTIVITY, { owner: address.toLowerCase(), limit: 100 });
       const entries = [
@@ -38,4 +39,8 @@ function compareCursor(value: Activity, cursor: string) {
   const [timestamp, blockNumber, logIndex] = cursor.split(':');
   if (!timestamp || !blockNumber || logIndex === undefined) return 1;
   return compareActivity(value, { timestamp, blockNumber, logIndex: Number(logIndex) });
+}
+function isCursor(cursor: string) {
+  const [timestamp, blockNumber, logIndex, extra] = cursor.split(':');
+  return extra === undefined && /^\d+$/.test(timestamp ?? '') && /^\d+$/.test(blockNumber ?? '') && /^\d+$/.test(logIndex ?? '');
 }

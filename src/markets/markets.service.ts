@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { type Address } from 'viem';
+import { isHex, type Address } from 'viem';
 import { IndexerService } from '../indexer/indexer.service.js';
 import { RpcService } from '../rpc/rpc.service.js';
 import { TtlCacheService } from '../shared/ttl-cache.service.js';
@@ -33,13 +33,14 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async pool(poolId: string) {
+    if (!isHex(poolId, { strict: true }) || poolId.length !== 66) throw new NotFoundException('Pool is not listed');
     const found = await Promise.all(this.deployments.all().map(async ([tier]) => ({ tier, pool: (await this.pools(tier)).find((item) => item.id.toLowerCase() === poolId.toLowerCase()) })));
     const entry = found.find((item) => item.pool);
     if (!entry?.pool) throw new NotFoundException('Pool is not listed');
     const pool = entry.pool;
     const market = this.deployments.get(entry.tier);
     const debt = await this.rpc.readContract<bigint>(market.address, marketAbi, 'poolDebt', [pool.id]);
-    return { ...pool, tierName: entry.tier, market: market.address, totalBorrowUsdg: debt.toString() };
+    return { ...pool, tierName: entry.tier, market: market.address, totalBorrowUsdg: debt.toString(), marketSizeUsdg: String(pool.debtCapUsdg) };
   }
 
   private async captureAll() { await Promise.all(this.deployments.all().map(([tier, market]) => this.capture(tier, market))); }
@@ -71,4 +72,4 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-type Pool = { id: string; tier: number; [key: string]: unknown };
+type Pool = { id: string; tier: number; debtCapUsdg?: string; [key: string]: unknown };

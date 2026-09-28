@@ -1,7 +1,7 @@
 import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { isAddress, type Address } from 'viem';
+import { isAddress, zeroAddress, type Address } from 'viem';
 import { SettingsService } from '../config/settings.service.js';
 
 export type MarketDeployment = { address: Address; lens: Address; valuer: Address; policy: Address; tier: number };
@@ -27,7 +27,9 @@ export class DeploymentService {
 
 function parseMarket(raw: unknown, name: string): MarketDeployment {
   const value = raw as Partial<MarketDeployment>;
-  for (const key of ['address', 'lens', 'valuer', 'policy'] as const) if (!isAddress(value[key] ?? '')) throw new Error(`markets.${name}.${key} must be an address`);
+  for (const key of ['address', 'lens', 'valuer', 'policy'] as const) {
+    if (!isAddress(value[key] ?? '') || value[key]?.toLowerCase() === zeroAddress) throw new Error(`markets.${name}.${key} must be a deployed contract address`);
+  }
   if (!Number.isInteger(value.tier) || value.tier! < 1 || value.tier! > 2) throw new Error(`markets.${name}.tier must be 1 or 2`);
   return value as MarketDeployment;
 }
