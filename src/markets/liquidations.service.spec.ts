@@ -170,4 +170,159 @@ describe('LiquidationsService', () => {
       vi.useRealTimers();
     }
   });
+
+  it('returns an empty fresh queue when the newest cycle has no loans', async () => {
+    const observedAt = new Date('2026-09-28T00:00:00Z');
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(observedAt.getTime() + 1_000));
+    try {
+      const repository = {
+        latestHealthFactors: vi.fn(async (snapshotId?: string) =>
+          snapshotId
+            ? []
+            : [{ observedAt: new Date(observedAt.getTime() - 30_000) }],
+        ),
+        latestHealthFactorHeartbeat: vi.fn().mockResolvedValue({
+          observedAt,
+          details: { snapshotId: 'current-cycle', blockNumber: '124' },
+        }),
+      };
+      const service = new LiquidationsService(
+        {} as never,
+        {} as never,
+        {} as never,
+        repository as never,
+      );
+
+      await expect(service.liquidations()).resolves.toMatchObject({
+        items: [],
+        snapshotAt: observedAt,
+        blockNumber: '124',
+        stale: false,
+      });
+      expect(repository.latestHealthFactors).toHaveBeenCalledWith(
+        'current-cycle',
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('loads every indexer loan page before building a snapshot', async () => {
+    const indexer = {
+      query: vi
+        .fn()
+        .mockResolvedValueOnce({
+          loans: {
+            items: [{ tokenId: '1', owner: '0xborrower', poolId }],
+            pageInfo: { hasNextPage: true, endCursor: 'cursor-1' },
+          },
+        })
+        .mockResolvedValueOnce({
+          loans: {
+            items: [{ tokenId: '2', owner: '0xborrower', poolId }],
+            pageInfo: { hasNextPage: false },
+          },
+        }),
+    };
+    const service = new LiquidationsService(
+      {} as never,
+      {} as never,
+      indexer as never,
+      {} as never,
+    );
+    const allLoans = (
+      service as unknown as {
+        allLoans: (...args: unknown[]) => Promise<unknown[]>;
+      }
+    ).allLoans;
+
+    await expect(allLoans.call(service, market)).resolves.toHaveLength(2);
+    expect(indexer.query).toHaveBeenNthCalledWith(
+      2,
+      expect.stringContaining('pageInfo { hasNextPage endCursor }'),
+      { market, after: 'cursor-1' },
+    );
+  });
+
+  it('stops loan pagination when the indexer repeats a cursor', async () => {
+    const indexer = {
+      query: vi.fn().mockResolvedValue({
+        loans: {
+          items: [{ tokenId: '1', owner: '0xborrower', poolId }],
+          pageInfo: { hasNextPage: true, endCursor: 'stuck-cursor' },
+        },
+      }),
+    };
+    const service = new LiquidationsService(
+      {} as never,
+      {} as never,
+      indexer as never,
+      {} as never,
+    );
+    const allLoans = (
+      service as unknown as {
+        allLoans: (...args: unknown[]) => Promise<unknown[]>;
+      }
+    ).allLoans;
+
+    await expect(allLoans.call(service, market)).rejects.toThrow(
+      'Indexer loan pagination cursor did not advance',
+    );
+    expect(indexer.query).toHaveBeenCalledTimes(2);
+  });
+
+  it('records a partial snapshot and heartbeat when a market RPC call fails', async () => {
+    const deployment = { address: market, lens, policy };
+    const deployments = {
+      all: () => [['market', {}]],
+      resolve: vi.fn().mockResolvedValue(deployment),
+    };
+    const rpc = {
+      getBlockNumber: vi.fn().mockResolvedValue(123n),
+      clientForRead: {
+        getBlock: vi.fn().mockResolvedValue({ timestamp: 1_790_000_000n }),
+      },
+      multicall: vi.fn().mockRejectedValue(new Error('RPC unavailable')),
+    };
+    const indexer = {
+      query: vi.fn(async (query: string) =>
+        query.includes('query Loans')
+          ? {
+              loans: {
+                items: [{ tokenId: '41', owner: '0xborrower', poolId }],
+                pageInfo: { hasNextPage: false },
+              },
+            }
+          : { pools: { items: [], pageInfo: { hasNextPage: false } } },
+      ),
+    };
+    const repository = {
+      insertHealthFactors: vi.fn(),
+      pruneHealthFactors: vi.fn(),
+      heartbeat: vi.fn(),
+    };
+    const service = new LiquidationsService(
+      deployments as never,
+      rpc as never,
+      indexer as never,
+      repository as never,
+    );
+    const capture = (
+      service as unknown as { capture: () => Promise<void> }
+    ).capture;
+
+    await capture.call(service);
+
+    expect(repository.insertHealthFactors).toHaveBeenCalledWith(
+      [expect.objectContaining({ status: 'error', tokenId: '41' })],
+      123n,
+      new Date(1_790_000_000_000),
+      expect.any(String),
+    );
+    expect(repository.heartbeat).toHaveBeenCalledWith(
+      new Date(1_790_000_000_000),
+      expect.objectContaining({ positions: 1, errors: 1 }),
+    );
+  });
 });

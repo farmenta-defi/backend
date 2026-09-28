@@ -59,45 +59,59 @@ export class MarketRepository implements OnModuleDestroy {
     rows: HealthFactorRow[],
     blockNumber: bigint,
     observedAt: Date,
+    snapshotId: string,
   ) {
-    if (rows.length === 0) return;
-    const values: unknown[] = [];
-    const tuples = rows.map((row, index) => {
-      const offset = index * 14;
-      values.push(
-        row.market,
-        row.tokenId,
-        row.healthFactor,
-        observedAt,
-        blockNumber.toString(),
-        row.debtUsdg,
-        row.debtUsd,
-        row.poolId,
-        row.borrower,
-        row.thresholdBps,
-        row.bonusBps,
-        row.rampActive,
-        row.status,
-        row.error,
+    for (let start = 0; start < rows.length; start += 1000) {
+      const batch = rows.slice(start, start + 1000);
+      const values: unknown[] = [];
+      const tuples = batch.map((row, index) => {
+        const offset = index * 15;
+        values.push(
+          row.market,
+          row.tokenId,
+          row.healthFactor,
+          observedAt,
+          snapshotId,
+          blockNumber.toString(),
+          row.debtUsdg,
+          row.debtUsd,
+          row.poolId,
+          row.borrower,
+          row.thresholdBps,
+          row.bonusBps,
+          row.rampActive,
+          row.status,
+          row.error,
+        );
+        return `(${Array.from({ length: 15 }, (_, i) => `$${offset + i + 1}`).join(',')})`;
+      });
+      await this.pool.query(
+        `insert into backend.hf_snapshot (market,token_id,health_factor,observed_at,snapshot_id,block_number,debt_usdg,debt_usd,pool_id,borrower,threshold_bps,bonus_bps,ramp_active,status,error) values ${tuples.join(',')} on conflict (market,token_id,observed_at) do update set health_factor=excluded.health_factor,snapshot_id=excluded.snapshot_id,block_number=excluded.block_number,debt_usdg=excluded.debt_usdg,debt_usd=excluded.debt_usd,pool_id=excluded.pool_id,borrower=excluded.borrower,threshold_bps=excluded.threshold_bps,bonus_bps=excluded.bonus_bps,ramp_active=excluded.ramp_active,status=excluded.status,error=excluded.error`,
+        values,
       );
-      return `($${offset + 1},$${offset + 2},$${offset + 3},$${offset + 4},$${offset + 5},$${offset + 6},$${offset + 7},$${offset + 8},$${offset + 9},$${offset + 10},$${offset + 11},$${offset + 12},$${offset + 13},$${offset + 14})`;
-    });
-    await this.pool.query(
-      `insert into backend.hf_snapshot (market,token_id,health_factor,observed_at,block_number,debt_usdg,debt_usd,pool_id,borrower,threshold_bps,bonus_bps,ramp_active,status,error) values ${tuples.join(',')}`,
-      values,
-    );
+    }
   }
 
-  async latestHealthFactors() {
+  async latestHealthFactors(snapshotId?: string) {
     const { rows } = await this.pool.query<
       HealthFactorRow & {
         blockNumber: string;
         observedAt: Date;
       }
     >(
-      `with latest as (select max(observed_at) observed_at from backend.hf_snapshot) select market, token_id::text as "tokenId", health_factor::text as "healthFactor", debt_usdg::text as "debtUsdg", debt_usd::text as "debtUsd", pool_id as "poolId", borrower, threshold_bps as "thresholdBps", bonus_bps as "bonusBps", ramp_active as "rampActive", status, error, block_number::text as "blockNumber", observed_at as "observedAt" from backend.hf_snapshot where observed_at = (select observed_at from latest) order by health_factor asc nulls last, token_id asc`,
+      snapshotId
+        ? `select market, token_id::text as "tokenId", health_factor::text as "healthFactor", debt_usdg::text as "debtUsdg", debt_usd::text as "debtUsd", pool_id as "poolId", borrower, threshold_bps as "thresholdBps", bonus_bps as "bonusBps", ramp_active as "rampActive", status, error, block_number::text as "blockNumber", observed_at as "observedAt" from backend.hf_snapshot where snapshot_id=$1 order by health_factor asc nulls last, token_id asc`
+        : `with latest as (select max(observed_at) observed_at from backend.hf_snapshot) select market, token_id::text as "tokenId", health_factor::text as "healthFactor", debt_usdg::text as "debtUsdg", debt_usd::text as "debtUsd", pool_id as "poolId", borrower, threshold_bps as "thresholdBps", bonus_bps as "bonusBps", ramp_active as "rampActive", status, error, block_number::text as "blockNumber", observed_at as "observedAt" from backend.hf_snapshot where observed_at = (select observed_at from latest) order by health_factor asc nulls last, token_id asc`,
+      snapshotId ? [snapshotId] : [],
     );
     return rows;
+  }
+
+  async pruneHealthFactors(before: Date) {
+    await this.pool.query(
+      `delete from backend.hf_snapshot where observed_at < $1::timestamptz - interval '24 hours'`,
+      [before],
+    );
   }
 
   async heartbeat(observedAt: Date, details: Record<string, unknown>) {
@@ -110,7 +124,7 @@ export class MarketRepository implements OnModuleDestroy {
   async latestHealthFactorHeartbeat() {
     const { rows } = await this.pool.query<{
       observedAt: Date;
-      details: { blockNumber?: string };
+      details: { blockNumber?: string; snapshotId?: string };
     }>(
       `select observed_at as "observedAt", details from backend.service_heartbeat where service='backend-hf-snapshot'`,
     );

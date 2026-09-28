@@ -4,6 +4,7 @@ import {
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import { type Address } from 'viem';
 import { IndexerService } from '../indexer/indexer.service.js';
 import { RpcService } from '../rpc/rpc.service.js';
@@ -20,8 +21,8 @@ import { HealthFactorRow, MarketRepository } from './market.repository.js';
 const INTERVAL_MS = 30_000;
 const STALE_AFTER_MS = 90_000;
 const MAX_CALLS_PER_BATCH = 100;
-const LOANS_QUERY = `query Loans($market: String!) { loans(limit: 1000, where: { market: $market, status: "in_custody" }) { items { tokenId owner poolId } } }`;
-const POOLS_QUERY = `query Pools { pools(limit: 1000) { items { id currency0 currency1 } } }`;
+const LOANS_QUERY = `query Loans($market: String!, $after: String) { loans(limit: 1000, after: $after, where: { market: $market, status: "in_custody" }) { items { tokenId owner poolId } pageInfo { hasNextPage endCursor } } }`;
+const POOLS_QUERY = `query Pools($after: String) { pools(limit: 1000, after: $after) { items { id currency0 currency1 } pageInfo { hasNextPage endCursor } } }`;
 
 type Loan = { tokenId: string; owner: string; poolId: string };
 type Pool = { id: string; currency0: string | null; currency1: string | null };
@@ -60,15 +61,29 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async liquidations() {
-    const [rows, heartbeat] = await Promise.all([
-      this.repository.latestHealthFactors(),
-      this.repository.latestHealthFactorHeartbeat(),
-    ]);
-    const snapshotAt = rows[0]?.observedAt ?? heartbeat?.observedAt ?? null;
+    const heartbeat = await this.repository.latestHealthFactorHeartbeat();
+    const rows = await this.repository.latestHealthFactors(
+      heartbeat?.details.snapshotId,
+    );
+    const rowSnapshotAt = rows[0]?.observedAt ?? null;
+    const snapshotAt =
+      rowSnapshotAt && heartbeat?.observedAt
+        ? new Date(rowSnapshotAt).getTime() >=
+          new Date(heartbeat.observedAt).getTime()
+          ? rowSnapshotAt
+          : heartbeat.observedAt
+        : (rowSnapshotAt ?? heartbeat?.observedAt ?? null);
     const stale =
       !snapshotAt ||
       Date.now() - new Date(snapshotAt).getTime() > STALE_AFTER_MS;
-    const queue = rows
+    const currentRows = snapshotAt
+      ? rows.filter(
+          (row) =>
+            new Date(row.observedAt).getTime() ===
+            new Date(snapshotAt).getTime(),
+        )
+      : [];
+    const queue = currentRows
       .filter(
         (row) => row.status !== 'error' && BigInt(row.debtUsdg ?? '0') > 0n,
       )
@@ -113,6 +128,7 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
 
   private async capture() {
     const startedAt = Date.now();
+    const snapshotId = randomUUID();
     const blockNumber = await this.rpc.getBlockNumber();
     const block = await this.rpc.clientForRead
       .getBlock({ blockNumber })
@@ -124,17 +140,14 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
       Promise.all(
         this.deployments.all().map(async ([, raw]) => {
           const deployment = await this.deployments.resolve(raw);
-          const result = await this.indexer.query<{ loans: { items: Loan[] } }>(
-            LOANS_QUERY,
-            { market: deployment.address.toLowerCase() },
-          );
-          return { deployment, loans: result.loans.items };
+          const loans = await this.allLoans(deployment.address.toLowerCase());
+          return { deployment, loans };
         }),
       ),
-      this.indexer.query<{ pools: { items: Pool[] } }>(POOLS_QUERY),
+      this.allPools(),
     ]);
     const poolNames = new Map(
-      poolsData.pools.items.map((pool) => [
+      poolsData.map((pool) => [
         pool.id.toLowerCase(),
         pool.currency0 && pool.currency1
           ? `${pool.currency0}/${pool.currency1}`
@@ -143,25 +156,90 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
     );
     const rows: HealthFactorRow[] = [];
     for (const { deployment, loans } of loansByMarket) {
-      rows.push(
-        ...(await this.captureMarket(
-          deployment.address,
-          deployment.lens,
-          deployment.policy,
-          loans,
-          poolNames,
-          blockNumber,
-          observedAt,
-        )),
-      );
+      try {
+        rows.push(
+          ...(await this.captureMarket(
+            deployment.address,
+            deployment.lens,
+            deployment.policy,
+            loans,
+            poolNames,
+            blockNumber,
+            observedAt,
+          )),
+        );
+      } catch (error) {
+        this.logger.error(
+          `Market snapshot failed for ${deployment.address}: ${error instanceof Error ? error.message : 'unknown error'}`,
+        );
+        rows.push(
+          ...loans.map((loan) =>
+            errorRow(
+              deployment.address,
+              loan,
+              poolNames.get(loan.poolId.toLowerCase()) ?? loan.poolId,
+              'Market snapshot failed',
+            ),
+          ),
+        );
+      }
     }
-    await this.repository.insertHealthFactors(rows, blockNumber, observedAt);
+    await this.repository.insertHealthFactors(
+      rows,
+      blockNumber,
+      observedAt,
+      snapshotId,
+    );
+    await this.repository.pruneHealthFactors(observedAt);
     await this.repository.heartbeat(observedAt, {
+      snapshotId,
       blockNumber: blockNumber.toString(),
       positions: rows.length,
       errors: rows.filter((row) => row.status === 'error').length,
       durationMs: Date.now() - startedAt,
     });
+  }
+
+  private async allLoans(market: string): Promise<Loan[]> {
+    const all: Loan[] = [];
+    const cursors = new Set<string>();
+    let after: string | undefined;
+    while (true) {
+      const page = await this.indexer.query<{
+        loans: {
+          items: Loan[];
+          pageInfo: { hasNextPage: boolean; endCursor?: string };
+        };
+      }>(LOANS_QUERY, { market, after });
+      all.push(...page.loans.items);
+      if (!page.loans.pageInfo.hasNextPage) return all;
+      const cursor = page.loans.pageInfo.endCursor;
+      if (!cursor || cursors.has(cursor))
+        throw new Error('Indexer loan pagination cursor did not advance');
+      cursors.add(cursor);
+      after = cursor;
+    }
+  }
+
+  private async allPools(): Promise<Pool[]> {
+    const all: Pool[] = [];
+    const cursors = new Set<string>();
+    let after: string | undefined;
+    while (true) {
+      const page = await this.indexer.query<{
+        pools: {
+          items: Pool[];
+          pageInfo: { hasNextPage: boolean; endCursor?: string };
+        };
+      }>(POOLS_QUERY, { after });
+      all.push(...page.pools.items);
+      if (!page.pools.pageInfo.hasNextPage) return all;
+      const cursor = page.pools.pageInfo.endCursor;
+      if (!cursor || cursors.has(cursor))
+        throw new Error('Indexer pool pagination cursor did not advance');
+      cursors.add(cursor);
+      after = cursor;
+    }
   }
 
   private async captureMarket(
@@ -322,7 +400,12 @@ export class LiquidationsService implements OnModuleInit, OnModuleDestroy {
   }
 }
 
-function errorRow(market: string, loan: Loan, poolId: string): HealthFactorRow {
+function errorRow(
+  market: string,
+  loan: Loan,
+  poolId: string,
+  error = 'Position view reverted',
+): HealthFactorRow {
   return {
     market,
     tokenId: loan.tokenId,
@@ -335,6 +418,6 @@ function errorRow(market: string, loan: Loan, poolId: string): HealthFactorRow {
     bonusBps: null,
     rampActive: false,
     status: 'error',
-    error: 'Position view reverted',
+    error,
   };
 }

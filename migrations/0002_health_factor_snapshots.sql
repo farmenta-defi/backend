@@ -1,4 +1,5 @@
 alter table backend.hf_snapshot
+  add column if not exists snapshot_id text,
   add column if not exists block_number numeric(78, 0),
   add column if not exists debt_usdg numeric(78, 0),
   add column if not exists debt_usd numeric(78, 0),
@@ -13,3 +14,5 @@ alter table backend.hf_snapshot
 alter table backend.hf_snapshot alter column health_factor drop not null;
 create index if not exists hf_snapshot_latest_idx
   on backend.hf_snapshot (observed_at desc, market, token_id);
+create index if not exists hf_snapshot_cycle_idx
+  on backend.hf_snapshot (snapshot_id, health_factor asc, token_id asc);
