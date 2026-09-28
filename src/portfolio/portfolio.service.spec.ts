@@ -15,6 +15,7 @@ describe('PortfolioService', () => {
         if (functionName === 'convertToAssets') return BigInt(args[0] as string);
         throw new Error(`unexpected ${functionName}`);
       }),
+      multicall: vi.fn(async () => [25n, 110n, 2n * 10n ** 18n, [0n, 0n, 0n, 0n, 0n, 100n, 80n, 0n]]),
     };
     const service = new PortfolioService(
       { query: vi.fn().mockResolvedValue({ positions: { items: [{ tokenId: '1', poolId: `0x${'a'.repeat(64)}` }, { tokenId: '2', poolId: `0x${'b'.repeat(64)}` }] }, loans: { items: [{ market, tokenId: '3', poolId: `0x${'c'.repeat(64)}`, status: 'in_custody' }] }, vaultBalances: { items: [] } }) },
@@ -28,5 +29,6 @@ describe('PortfolioService', () => {
       expect.objectContaining({ tokenId: '2', status: 'wallet' }),
       expect.objectContaining({ tokenId: '3', status: 'in_custody', collateralUsd: '110', uncollectedFeesUsd: '80' }),
     ]));
+    expect(rpc.multicall).toHaveBeenCalledOnce();
   });
 });

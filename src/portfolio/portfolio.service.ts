@@ -40,9 +40,12 @@ export class PortfolioService {
     const deployment = this.deployments.all().map(([, value]) => value).find((value) => value.address.toLowerCase() === loan.market.toLowerCase());
     if (!deployment) return { ...loan, status: 'in_custody' };
     const tokenId = BigInt(loan.tokenId);
-    const [debt, collateralUsd, healthFactor, valuation] = await Promise.all([
-      this.rpc.readContract<bigint>(deployment.address, marketAbi, 'debtOf', [tokenId]), this.rpc.readContract<bigint>(deployment.lens, lensAbi, 'positionValue', [tokenId]), this.rpc.readContract<bigint>(deployment.lens, lensAbi, 'healthFactor', [tokenId]), this.rpc.readContract<readonly unknown[]>(deployment.valuer, valuerAbi, 'value', [tokenId]),
-    ]);
+    const [debt, collateralUsd, healthFactor, valuation] = await this.rpc.multicall([
+      { address: deployment.address, abi: marketAbi, functionName: 'debtOf', args: [tokenId] },
+      { address: deployment.lens, abi: lensAbi, functionName: 'positionValue', args: [tokenId] },
+      { address: deployment.lens, abi: lensAbi, functionName: 'healthFactor', args: [tokenId] },
+      { address: deployment.valuer, abi: valuerAbi, functionName: 'value', args: [tokenId] },
+    ]) as [bigint, bigint, bigint, readonly unknown[]];
     // IPositionValuer.Valuation: feesUsd is index 6 and intentionally has no 10% cap.
     return { ...loan, debtUsdg: debt.toString(), collateralUsd: collateralUsd.toString(), uncollectedFeesUsd: BigInt(valuation[6] as bigint).toString(), healthFactor: healthFactor.toString(), status: 'in_custody' };
   }

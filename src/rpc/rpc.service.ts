@@ -18,5 +18,9 @@ export class RpcService {
     return this.client.readContract({ address, abi, functionName, args, blockNumber } as never) as Promise<T>;
   }
 
+  async multicall(contracts: Array<{ address: Address; abi: Abi; functionName: string; args?: readonly unknown[] }>) {
+    return this.client.multicall({ contracts: contracts as never, allowFailure: false }) as Promise<unknown[]>;
+  }
+
   get clientForRead(): PublicClient { return this.client; }
 }
