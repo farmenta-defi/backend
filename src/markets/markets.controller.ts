@@ -6,11 +6,18 @@ import {
   Query,
 } from '@nestjs/common';
 import { MarketsService } from './markets.service.js';
+import { LiquidationsService } from './liquidations.service.js';
 import { HistoryRange } from './market.repository.js';
 
 @Controller()
 export class MarketsController {
-  constructor(private readonly markets: MarketsService) {}
+  constructor(
+    private readonly markets: MarketsService,
+    private readonly liquidations: LiquidationsService,
+  ) {}
+  @Get('liquidations') getLiquidations() {
+    return this.liquidations.liquidations();
+  }
   @Get('markets') getMarkets(@Query('range') range?: string) {
     return this.markets.markets(historyRange(range));
   }

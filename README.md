@@ -61,6 +61,23 @@ psql "$DATABASE_URL" -c 'insert into ponder.loan (market, token_id) values (''0x
 The provision script also revokes this role's `CONNECT` privilege on the unrelated `lpmon`
 database on the shared Postgres server.
 
+## Liquidation snapshots
+
+The backend refreshes health-factor snapshots every 30 seconds. Each cycle reads the in-custody
+loans from the indexer and pins `liquidationHealthFactor`, `debtOf`, and pool terms to one chain
+block. Multicall uses `allowFailure`; a failed position is retained with `status: error` and does
+not discard other positions. `/liquidations` returns the latest debt-bearing positions ordered by
+health factor and sets `stale: true` when the snapshot is older than 90 seconds. Snapshot
+completion updates the `backend-hf-snapshot` heartbeat.
+
+Multicall is split into batches of at most 100 view calls (up to 50 positions before pool-term
+reads), all pinned to the same block. This is a conservative initial RPC budget, not a verified
+provider gas ceiling. The latest recorded contract test measurement for `MarketLens.healthFactor`
+is 118,191 gas; FAR-38's runtime call is `liquidationHealthFactor`, so its deployed gas usage and
+the provider's `eth_call` ceiling still need measurement against the configured RPC and deployment.
+The implementation keeps batches bounded and reports cycle duration in the heartbeat details so
+the 150-loan/30-second target can be checked in the deployed environment.
+
 ## Contract artifacts and deployments
 
 `contracts/source.json` pins the `smart-contract` revision shared with the indexer. Regenerate
