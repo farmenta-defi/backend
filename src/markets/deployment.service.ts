@@ -1,4 +1,4 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isAddress, zeroAddress, type Address } from 'viem';
@@ -58,10 +58,7 @@ export class DeploymentService {
   }
   async get(tier: string): Promise<ResolvedMarketDeployment> {
     const market = this.markets[normalizeTier(tier)];
-    if (!market)
-      throw new ServiceUnavailableException(
-        'Market deployment is not configured',
-      );
+    if (!market) throw new NotFoundException('Market tier is not configured');
     return this.resolve(market);
   }
   async resolve(market: MarketDeployment): Promise<ResolvedMarketDeployment> {
@@ -76,8 +73,12 @@ export class DeploymentService {
       market.tier ??
         this.rpc.readContract<number>(market.address, marketAbi, 'tier'),
     ]).then(([policy, valuer, tier]) => ({ ...market, policy, valuer, tier }));
-    this.resolved.set(key, value);
-    return value;
+    const memoized = value.catch((error) => {
+      this.resolved.delete(key);
+      throw error;
+    });
+    this.resolved.set(key, memoized);
+    return memoized;
   }
 }
 
