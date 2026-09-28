@@ -6,6 +6,8 @@ export class SettingsService {
   readonly databaseUrl = requireUrl('DATABASE_URL');
   readonly rpcUrl = requireUrl('RPC_URL');
   readonly indexerStatusUrl = requireUrl('INDEXER_STATUS_URL');
+  readonly indexerGraphqlUrl = requireUrl('INDEXER_GRAPHQL_URL');
+  readonly deployment = process.env.FARMENTA_DEPLOYMENT;
   readonly corsOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((origin) => origin.trim())

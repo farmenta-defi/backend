@@ -12,6 +12,7 @@ describe('AppController (e2e)', () => {
     process.env.DATABASE_URL = 'postgres://backend:password@localhost:5432/farmenta';
     process.env.RPC_URL = 'http://127.0.0.1:8545';
     process.env.INDEXER_STATUS_URL = 'http://127.0.0.1:42069/status';
+    process.env.INDEXER_GRAPHQL_URL = 'http://127.0.0.1:42069/graphql';
     process.env.CORS_ORIGINS = 'https://app.farmenta.example';
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
