@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
   OnModuleDestroy,
   OnModuleInit,
 } from '@nestjs/common';
@@ -27,6 +28,10 @@ import {
 
 const YEAR = 31_536_000n;
 const WAD = 10n ** 18n;
+const MARKET_DEBT_CAP_USDG: Record<number, bigint> = {
+  1: 500_000n * 10n ** 6n,
+  2: 50_000n * 10n ** 6n,
+};
 const POOLS = `query Pools($after: String) { pools(limit: 1000, after: $after) { items { id currency0 currency1 fee tickSpacing hooks tier maxLtvBps ltBps liquidatorBonusBps removeHaircutBps debtCapUsdg minPositionUsd frozen } pageInfo { hasNextPage endCursor } } }`;
 
 @Injectable()
@@ -110,18 +115,62 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
     if (!entry?.pool) throw new NotFoundException('Pool is not listed');
     const pool = entry.pool;
     const market = await this.deployments.get(entry.tier);
-    const debt = await this.rpc.readContract<bigint>(
-      market.address,
-      marketAbi,
-      'poolDebt',
-      [pool.id],
-    );
+    const block = await this.rpc.getBlockNumber();
+    const [debt, totalAssets, totalBorrows, reserves, latest, rate6hBps] =
+      await Promise.all([
+        this.rpc.readContract<bigint>(
+          market.address,
+          marketAbi,
+          'poolDebt',
+          [pool.id],
+          block,
+        ),
+        this.rpc.readContract<bigint>(
+          market.address,
+          marketAbi,
+          'totalAssets',
+          [],
+          block,
+        ),
+        this.rpc.readContract<bigint>(
+          market.address,
+          marketAbi,
+          'totalBorrows',
+          [],
+          block,
+        ),
+        this.rpc.readContract<bigint>(
+          market.address,
+          marketAbi,
+          'reserves',
+          [],
+          block,
+        ),
+        this.repository.latest(market.address),
+        this.repository.averageBorrowAprBps(market.address),
+      ]);
+    const debtCap = BigInt(pool.debtCapUsdg ?? '0');
+    const marketDebtCap = MARKET_DEBT_CAP_USDG[market.tier] ?? 0n;
+    const cash = totalAssets + reserves - totalBorrows;
+    const availableToBorrow = [
+      cash,
+      debtCap - debt,
+      marketDebtCap - totalBorrows,
+    ].reduce((minimum, value) => (value < minimum ? value : minimum));
     return {
       ...pool,
       tierName: entry.tier,
       market: market.address,
       totalBorrowUsdg: debt.toString(),
       marketSizeUsdg: String(pool.debtCapUsdg),
+      poolDebtUsdg: debt.toString(),
+      debtCapUsdg: debtCap.toString(),
+      availableToBorrowUsdg: (availableToBorrow > 0n
+        ? availableToBorrow
+        : 0n
+      ).toString(),
+      borrowAprPct: bpsToPercent(latest?.borrowAprBps ?? 0),
+      rate6hPct: bpsToPercent(rate6hBps),
       history: await this.repository.history(market.address, range),
     };
   }
@@ -134,6 +183,10 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
       };
     }>(POOLS, { after }, `pools:${after ?? ''}`);
     const next = [...result, ...page.pools.items];
+    if (page.pools.pageInfo.hasNextPage && !page.pools.pageInfo.endCursor)
+      throw new ServiceUnavailableException(
+        'Indexer pagination is unavailable',
+      );
     return page.pools.pageInfo.hasNextPage
       ? this.allPools(page.pools.pageInfo.endCursor, next)
       : next;
@@ -240,6 +293,15 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
       return listing.listed;
     });
   }
+  async findListedMarket(
+    poolId: string,
+  ): Promise<ResolvedMarketDeployment | undefined> {
+    for (const [, raw] of this.deployments.all()) {
+      const market = await this.deployments.resolve(raw);
+      if (await this.isListed(market, poolId)) return market;
+    }
+    return undefined;
+  }
 }
 
 type Pool = {
@@ -249,3 +311,8 @@ type Pool = {
   [key: string]: unknown;
 };
 type ListedPool = Pool & { effectiveLtBps: number };
+function bpsToPercent(value: number) {
+  const whole = Math.trunc(value / 100);
+  const fraction = String(value % 100).padStart(2, '0');
+  return `${whole}.${fraction}`;
+}

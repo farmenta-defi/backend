@@ -45,7 +45,7 @@ export class MarketRepository implements OnModuleDestroy {
   ): Promise<Snapshot[]> {
     const { interval, origin } = ranges[range];
     const { rows } = await this.pool.query<Snapshot>(
-      `select market, min(tier) as tier, avg(total_assets)::text as "totalAssets", avg(total_borrows)::text as "totalBorrows", avg(reserves)::text as reserves, avg(utilization_bps)::integer as "utilizationBps", avg(borrow_apr_bps)::integer as "borrowAprBps", avg(supply_apy_bps)::integer as "supplyApyBps", max(block_number)::text as "blockNumber", date_bin($2::interval, observed_at, 'epoch') as "observedAt" from backend.market_snapshot where market=$1 and observed_at >= now() - $3::interval group by market, date_bin($2::interval, observed_at, 'epoch') order by "observedAt" asc`,
+      `select market, min(tier) as tier, round(avg(total_assets))::numeric(78,0)::text as "totalAssets", round(avg(total_borrows))::numeric(78,0)::text as "totalBorrows", round(avg(reserves))::numeric(78,0)::text as reserves, round(avg(utilization_bps))::integer as "utilizationBps", round(avg(borrow_apr_bps))::integer as "borrowAprBps", round(avg(supply_apy_bps))::integer as "supplyApyBps", max(block_number)::text as "blockNumber", date_bin($2::interval, observed_at, 'epoch') as "observedAt" from backend.market_snapshot where market=$1 and observed_at >= now() - $3::interval group by market, date_bin($2::interval, observed_at, 'epoch') order by "observedAt" asc`,
       [market, interval, origin],
     );
     return rows;
@@ -56,6 +56,13 @@ export class MarketRepository implements OnModuleDestroy {
       [market],
     );
     return rows[0];
+  }
+  async averageBorrowAprBps(market: string): Promise<number> {
+    const { rows } = await this.pool.query<{ value: number | null }>(
+      `select round(avg(borrow_apr_bps))::integer as value from backend.market_snapshot where market=$1 and observed_at >= now() - interval '6 hours'`,
+      [market],
+    );
+    return rows[0]?.value ?? 0;
   }
   onModuleDestroy() {
     return this.pool.end();
