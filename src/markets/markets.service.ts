@@ -87,14 +87,12 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
     if (!isHex(poolId, { strict: true }) || poolId.length !== 66)
       throw new NotFoundException('Pool is not listed');
     const found = await Promise.all(
-      this.deployments
-        .all()
-        .map(async ([tier]) => ({
-          tier,
-          pool: (await this.pools(tier)).find(
-            (item) => item.id.toLowerCase() === poolId.toLowerCase(),
-          ),
-        })),
+      this.deployments.all().map(async ([tier]) => ({
+        tier,
+        pool: (await this.pools(tier)).find(
+          (item) => item.id.toLowerCase() === poolId.toLowerCase(),
+        ),
+      })),
     );
     const entry = found.find((item) => item.pool);
     if (!entry?.pool) throw new NotFoundException('Pool is not listed');
@@ -112,6 +110,7 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
       market: market.address,
       totalBorrowUsdg: debt.toString(),
       marketSizeUsdg: String(pool.debtCapUsdg),
+      history: await this.repository.history(market.address),
     };
   }
 
