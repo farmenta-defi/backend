@@ -57,12 +57,12 @@ export class MarketRepository implements OnModuleDestroy {
     );
     return rows[0];
   }
-  async averageBorrowAprBps(market: string): Promise<number> {
+  async averageBorrowAprBps(market: string): Promise<number | null> {
     const { rows } = await this.pool.query<{ value: number | null }>(
       `select round(avg(borrow_apr_bps))::integer as value from backend.market_snapshot where market=$1 and observed_at >= now() - interval '6 hours'`,
       [market],
     );
-    return rows[0]?.value ?? 0;
+    return rows[0]?.value ?? null;
   }
   onModuleDestroy() {
     return this.pool.end();

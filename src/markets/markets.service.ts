@@ -116,61 +116,88 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
     const pool = entry.pool;
     const market = await this.deployments.get(entry.tier);
     const block = await this.rpc.getBlockNumber();
-    const [debt, totalAssets, totalBorrows, reserves, latest, rate6hBps] =
-      await Promise.all([
-        this.rpc.readContract<bigint>(
-          market.address,
-          marketAbi,
-          'poolDebt',
-          [pool.id],
-          block,
-        ),
-        this.rpc.readContract<bigint>(
-          market.address,
-          marketAbi,
-          'totalAssets',
-          [],
-          block,
-        ),
-        this.rpc.readContract<bigint>(
-          market.address,
-          marketAbi,
-          'totalBorrows',
-          [],
-          block,
-        ),
-        this.rpc.readContract<bigint>(
-          market.address,
-          marketAbi,
-          'reserves',
-          [],
-          block,
-        ),
-        this.repository.latest(market.address),
-        this.repository.averageBorrowAprBps(market.address),
-      ]);
+    const [
+      canBorrow,
+      paused,
+      debt,
+      totalAssets,
+      totalBorrows,
+      reserves,
+      latest,
+      rate6hBps,
+    ] = await Promise.all([
+      this.rpc.readContract<boolean>(
+        market.policy,
+        policyAbi,
+        'acceptsNewPositions',
+        [pool.id],
+        block,
+      ),
+      this.rpc.readContract<boolean>(
+        market.address,
+        marketAbi,
+        'paused',
+        [],
+        block,
+      ),
+      this.rpc.readContract<bigint>(
+        market.address,
+        marketAbi,
+        'poolDebt',
+        [pool.id],
+        block,
+      ),
+      this.rpc.readContract<bigint>(
+        market.address,
+        marketAbi,
+        'totalAssets',
+        [],
+        block,
+      ),
+      this.rpc.readContract<bigint>(
+        market.address,
+        marketAbi,
+        'totalBorrows',
+        [],
+        block,
+      ),
+      this.rpc.readContract<bigint>(
+        market.address,
+        marketAbi,
+        'reserves',
+        [],
+        block,
+      ),
+      this.repository.latest(market.address),
+      this.repository.averageBorrowAprBps(market.address),
+    ]);
     const debtCap = BigInt(pool.debtCapUsdg ?? '0');
     const marketDebtCap = MARKET_DEBT_CAP_USDG[market.tier] ?? 0n;
     const cash = totalAssets + reserves - totalBorrows;
-    const availableToBorrow = [
-      cash,
-      debtCap - debt,
-      marketDebtCap - totalBorrows,
-    ].reduce((minimum, value) => (value < minimum ? value : minimum));
+    const availableToBorrow =
+      canBorrow && !paused
+        ? [cash, debtCap - debt, marketDebtCap - totalBorrows].reduce(
+            (minimum, value) => (value < minimum ? value : minimum),
+          )
+        : 0n;
+    const borrowingClosedReason = !canBorrow
+      ? 'frozen'
+      : paused
+        ? 'paused'
+        : null;
     return {
       ...pool,
       tierName: entry.tier,
       market: market.address,
-      totalBorrowUsdg: debt.toString(),
-      marketSizeUsdg: String(pool.debtCapUsdg),
       poolDebtUsdg: debt.toString(),
       debtCapUsdg: debtCap.toString(),
       availableToBorrowUsdg: (availableToBorrow > 0n
         ? availableToBorrow
         : 0n
       ).toString(),
-      borrowAprPct: bpsToPercent(latest?.borrowAprBps ?? 0),
-      rate6hPct: bpsToPercent(rate6hBps),
+      borrowingClosedReason,
+      borrowAprPct: latest ? bpsToPercent(latest.borrowAprBps) : null,
+      rate6hPct: rate6hBps === null ? null : bpsToPercent(rate6hBps),
       history: await this.repository.history(market.address, range),
     };
   }

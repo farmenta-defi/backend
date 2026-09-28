@@ -1,6 +1,13 @@
 export const marketAbi = [
   {
     type: 'function',
+    name: 'paused',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{ type: 'bool' }],
+  },
+  {
+    type: 'function',
     name: 'totalAssets',
     stateMutability: 'view',
     inputs: [],
@@ -127,6 +134,13 @@ export const valuerAbi = [
   },
 ] as const;
 export const policyAbi = [
+  {
+    type: 'function',
+    name: 'acceptsNewPositions',
+    stateMutability: 'view',
+    inputs: [{ type: 'bytes32' }],
+    outputs: [{ type: 'bool' }],
+  },
   {
     type: 'function',
     name: 'listingOf',
