@@ -102,6 +102,20 @@ export const lensAbi = [
     inputs: [{ type: 'uint256' }],
     outputs: [{ type: 'uint256' }],
   },
+  {
+    type: 'function',
+    name: 'liquidationHealthFactor',
+    stateMutability: 'view',
+    inputs: [{ type: 'uint256' }],
+    outputs: [{ type: 'uint256' }],
+  },
+  {
+    type: 'function',
+    name: 'liquidationCloseFactorBps',
+    stateMutability: 'view',
+    inputs: [{ type: 'uint256' }],
+    outputs: [{ type: 'uint16' }],
+  },
 ] as const;
 export const valuerAbi = [
   {

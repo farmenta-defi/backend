@@ -14,16 +14,48 @@ export class RpcService {
   }
 
   getBlockNumber(): Promise<bigint> {
-    return this.client.getBlockNumber().catch(() => { throw new ServiceUnavailableException('RPC is unavailable'); });
+    return this.client.getBlockNumber().catch(() => {
+      throw new ServiceUnavailableException('RPC is unavailable');
+    });
   }
 
-  readContract<T>(address: Address, abi: Abi, functionName: string, args: readonly unknown[] = [], blockNumber?: bigint): Promise<T> {
-    return this.client.readContract({ address, abi, functionName, args, blockNumber } as never).catch(() => { throw new ServiceUnavailableException('RPC is unavailable'); }) as Promise<T>;
+  readContract<T>(
+    address: Address,
+    abi: Abi,
+    functionName: string,
+    args: readonly unknown[] = [],
+    blockNumber?: bigint,
+  ): Promise<T> {
+    return this.client
+      .readContract({ address, abi, functionName, args, blockNumber } as never)
+      .catch(() => {
+        throw new ServiceUnavailableException('RPC is unavailable');
+      }) as Promise<T>;
   }
 
-  async multicall(contracts: Array<{ address: Address; abi: Abi; functionName: string; args?: readonly unknown[] }>) {
-    return this.client.multicall({ contracts: contracts as never, allowFailure: true, multicallAddress: MULTICALL3 }).catch(() => { throw new ServiceUnavailableException('RPC is unavailable'); }) as Promise<unknown[]>;
+  async multicall(
+    contracts: Array<{
+      address: Address;
+      abi: Abi;
+      functionName: string;
+      args?: readonly unknown[];
+    }>,
+    blockNumber?: bigint,
+  ) {
+    return this.client
+      .multicall({
+        contracts: contracts as never,
+        allowFailure: true,
+        multicallAddress: MULTICALL3,
+        blockNumber,
+        batchSize: 1_000_000,
+      })
+      .catch(() => {
+        throw new ServiceUnavailableException('RPC is unavailable');
+      }) as Promise<unknown[]>;
   }
 
-  get clientForRead(): PublicClient { return this.client; }
+  get clientForRead(): PublicClient {
+    return this.client;
+  }
 }
