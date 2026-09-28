@@ -1,3 +1,4 @@
+import { ServiceUnavailableException } from '@nestjs/common';
 import { describe, expect, it, vi } from 'vitest';
 import { MarketsService } from './markets.service.js';
 
@@ -296,4 +297,55 @@ describe('MarketsService', () => {
       rate6hPct: '0.00',
     });
   });
+
+  it.each(['acceptsNewPositions', 'paused'])(
+    'propagates a failed %s read as service unavailable',
+    async (failedRead) => {
+      const poolId = `0x${'d'.repeat(64)}`;
+      const market = {
+        address: '0x0000000000000000000000000000000000000002',
+        policy: '0x0000000000000000000000000000000000000003',
+        lens: '0x0000000000000000000000000000000000000004',
+        valuer: '0x0000000000000000000000000000000000000005',
+        tier: 1,
+      };
+      const service = new MarketsService(
+        {
+          all: () => [['blueChip', market]],
+          resolve: async (value: unknown) => value,
+          get: vi.fn().mockResolvedValue(market),
+        },
+        {
+          getBlockNumber: vi.fn().mockResolvedValue(40n),
+          readContract: vi.fn(
+            async (_address: string, _abi: unknown, name: string) => {
+              if (name === failedRead)
+                throw new ServiceUnavailableException('RPC is unavailable');
+              if (name === 'listingOf') return { listed: true };
+              if (name === 'effectiveLt') return 7500;
+              if (name === 'acceptsNewPositions') return true;
+              if (name === 'paused') return false;
+              throw new Error(`unexpected ${name}`);
+            },
+          ),
+        },
+        {
+          query: vi.fn().mockResolvedValue({
+            pools: {
+              items: [{ id: poolId, tier: 1, debtCapUsdg: '300000000' }],
+              pageInfo: { hasNextPage: false },
+            },
+          }),
+        },
+        {
+          history: vi.fn().mockResolvedValue([]),
+          latest: vi.fn().mockResolvedValue(undefined),
+          averageBorrowAprBps: vi.fn().mockResolvedValue(null),
+        },
+        { get: (_key: string, load: () => Promise<unknown>) => load() },
+      );
+
+      await expect(service.pool(poolId)).rejects.toMatchObject({ status: 503 });
+    },
+  );
 });
