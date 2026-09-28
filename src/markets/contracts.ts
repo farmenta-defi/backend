@@ -18,5 +18,5 @@ export const valuerAbi = [{ type: 'function', name: 'value', stateMutability: 'v
   { type: 'uint128' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' }, { type: 'uint256' },
 ] }] }] as const;
 export const policyAbi = [{ type: 'function', name: 'listingOf', stateMutability: 'view', inputs: [{ type: 'bytes32' }], outputs: [{ type: 'tuple', components: [
-  { type: 'bool', name: 'listed' }, { type: 'uint8', name: 'tier' }, { type: 'uint16' }, { type: 'uint16' }, { type: 'uint16' }, { type: 'uint16' }, { type: 'uint128' }, { type: 'uint128' }, { type: 'bool' }, { type: 'uint16' }, { type: 'uint16' }, { type: 'uint40' }, { type: 'uint40' },
+  { type: 'bool', name: 'listed' }, { type: 'bool', name: 'frozen' }, { type: 'uint8', name: 'tier' }, { type: 'uint16', name: 'maxLtvBps' }, { type: 'uint16', name: 'ltStartBps' }, { type: 'uint16', name: 'ltTargetBps' }, { type: 'uint40', name: 'rampStart' }, { type: 'uint40', name: 'rampDuration' }, { type: 'uint16', name: 'liquidatorBonusBps' }, { type: 'uint16', name: 'removeHaircutBps' }, { type: 'uint128', name: 'debtCapUsdg' }, { type: 'uint128', name: 'minPositionUsd' },
 ] }] }] as const;
