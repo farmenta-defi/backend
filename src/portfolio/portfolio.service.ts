@@ -1,20 +1,24 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { isAddress } from 'viem';
 import { IndexerService } from '../indexer/indexer.service.js';
 import { RpcService } from '../rpc/rpc.service.js';
 import { TtlCacheService } from '../shared/ttl-cache.service.js';
-import {
-  lensAbi,
-  marketAbi,
-  policyAbi,
-  valuerAbi,
-} from '../markets/contracts.js';
+import { lensAbi, marketAbi, valuerAbi } from '../markets/contracts.js';
 import { DeploymentService } from '../markets/deployment.service.js';
+import { MarketsService } from '../markets/markets.service.js';
 
-const PORTFOLIO = `query Portfolio($owner: String!) {
-  positions(where: { owner: $owner }, limit: 1000) { items { tokenId poolId tickLower tickUpper liquidity } }
-  loans(where: { owner: $owner, status: "in_custody" }, limit: 1000) { items { market tokenId poolId status } }
-  vaultBalances(where: { account: $owner }, limit: 1000) { items { market shares } }
+const PORTFOLIO_POSITIONS = `query PortfolioPositions($owner: String!, $after: String) {
+  positions(where: { owner: $owner }, limit: 1000, after: $after) { items { tokenId poolId tickLower tickUpper liquidity } pageInfo { hasNextPage endCursor } }
+}`;
+const PORTFOLIO_LOANS = `query PortfolioLoans($owner: String!, $after: String) {
+  loans(where: { owner: $owner, status: "in_custody" }, limit: 1000, after: $after) { items { market tokenId poolId status } pageInfo { hasNextPage endCursor } }
+}`;
+const PORTFOLIO_VAULTS = `query PortfolioVaults($owner: String!, $after: String) {
+  vaultBalances(where: { account: $owner }, limit: 1000, after: $after) { items { market shares } pageInfo { hasNextPage endCursor } }
 }`;
 
 @Injectable()
@@ -22,6 +26,7 @@ export class PortfolioService {
   constructor(
     private readonly indexer: IndexerService,
     private readonly deployments: DeploymentService,
+    private readonly markets: MarketsService,
     private readonly rpc: RpcService,
     private readonly cache: TtlCacheService,
   ) {}
@@ -30,21 +35,25 @@ export class PortfolioService {
     if (!isAddress(address) || /^0x0{40}$/i.test(address))
       throw new BadRequestException('address must be a non-zero address');
     return this.cache.get(`portfolio:${address.toLowerCase()}`, async () => {
-      const data = await this.indexer.query<PortfolioData>(PORTFOLIO, {
-        owner: address.toLowerCase(),
-      });
-      const wallet = (
-        await Promise.all(
-          data.positions.items.map((position) =>
-            this.enrichWalletPosition(position),
-          ),
-        )
-      ).filter(Boolean);
+      const owner = address.toLowerCase();
+      const [positions, loans, vaultBalances] = await Promise.all([
+        this.loadCollection<Record<string, unknown>, 'positions'>(
+          PORTFOLIO_POSITIONS,
+          'positions',
+          owner,
+        ),
+        this.loadCollection<Loan, 'loans'>(PORTFOLIO_LOANS, 'loans', owner),
+        this.loadCollection<
+          { market: `0x${string}`; shares: string },
+          'vaultBalances'
+        >(PORTFOLIO_VAULTS, 'vaultBalances', owner),
+      ]);
+      const wallet = await this.enrichWalletPositions(positions);
       const custody = await Promise.all(
-        data.loans.items.map((loan) => this.enrichLoan(loan)),
+        loans.map((loan) => this.enrichLoan(loan)),
       );
       const vaultShares = await Promise.all(
-        data.vaultBalances.items.map(async (share) => ({
+        vaultBalances.map(async (share) => ({
           ...share,
           assetsUsdg: (
             await this.rpc.readContract<bigint>(
@@ -64,56 +73,102 @@ export class PortfolioService {
     });
   }
 
-  private async enrichWalletPosition(position: Record<string, unknown>) {
-    const poolId = position.poolId;
-    if (typeof poolId !== 'string') return undefined;
-    for (const [, raw] of this.deployments.all()) {
-      const market = await this.deployments.resolve(raw);
-      if (
-        !(
-          await this.rpc.readContract<{ listed: boolean }>(
-            market.policy,
-            policyAbi,
-            'listingOf',
-            [poolId],
-          )
-        ).listed
-      )
-        continue;
-      const [value] = (await this.rpc.multicall([
-        {
-          address: market.valuer,
-          abi: valuerAbi,
-          functionName: 'value',
-          args: [BigInt(position.tokenId as string)],
-        },
-      ])) as MulticallResult[];
-      const valuation = resultOf(value) as readonly unknown[] | null;
-      if (!valuation)
-        return {
-          ...position,
-          status: 'wallet',
-          valueUsd: null,
-          uncollectedFeesUsd: null,
-          composition: null,
-          valuationError: 'unavailable',
-        };
-      const principalUsd = BigInt(valuation[5] as bigint);
-      const feesUsd = BigInt(valuation[6] as bigint);
+  private async loadCollection<
+    T,
+    K extends 'positions' | 'loans' | 'vaultBalances',
+  >(query: string, key: K, owner: string): Promise<T[]> {
+    const items: T[] = [];
+    let after: string | undefined;
+    do {
+      const data = await this.indexer.query<
+        Record<
+          K,
+          { items: T[]; pageInfo: { hasNextPage: boolean; endCursor?: string } }
+        >
+      >(query, { owner, after }, `portfolio:${key}:${owner}:${after ?? ''}`);
+      const page = data[key];
+      items.push(...page.items);
+      if (page.pageInfo.hasNextPage && !page.pageInfo.endCursor)
+        throw new ServiceUnavailableException(
+          'Indexer pagination is unavailable',
+        );
+      after = page.pageInfo.hasNextPage ? page.pageInfo.endCursor : undefined;
+    } while (after);
+    return items;
+  }
+
+  private async enrichWalletPositions(
+    positions: Array<Record<string, unknown>>,
+  ) {
+    const listedByPool = new Map<
+      string,
+      Awaited<ReturnType<MarketsService['findListedMarket']>>
+    >();
+    const poolIds = [
+      ...new Set(
+        positions
+          .map((position) => position.poolId)
+          .filter((poolId): poolId is string => typeof poolId === 'string'),
+      ),
+    ];
+    await Promise.all(
+      poolIds.map(async (poolId) =>
+        listedByPool.set(
+          poolId.toLowerCase(),
+          await this.markets.findListedMarket(poolId),
+        ),
+      ),
+    );
+    const listed = positions.flatMap((position) => {
+      const poolId = position.poolId;
+      const market =
+        typeof poolId === 'string'
+          ? listedByPool.get(poolId.toLowerCase())
+          : undefined;
+      return market ? [{ position, market }] : [];
+    });
+    if (!listed.length) return [];
+    const results = (await this.rpc.multicall(
+      listed.map(({ position, market }) => ({
+        address: market!.valuer,
+        abi: valuerAbi,
+        functionName: 'value',
+        args: [BigInt(position.tokenId as string)],
+      })),
+    )) as MulticallResult[];
+    return listed.map(({ position }, index) =>
+      this.walletPosition(position, results[index]),
+    );
+  }
+
+  private walletPosition(
+    position: Record<string, unknown>,
+    call: MulticallResult,
+  ) {
+    const valuation = resultOf(call) as readonly unknown[] | null;
+    if (!valuation)
       return {
         ...position,
         status: 'wallet',
-        valueUsd: (principalUsd + feesUsd).toString(),
-        uncollectedFeesUsd: feesUsd.toString(),
-        composition: {
-          amount0: BigInt(valuation[1] as bigint).toString(),
-          amount1: BigInt(valuation[2] as bigint).toString(),
-          fees0: BigInt(valuation[3] as bigint).toString(),
-          fees1: BigInt(valuation[4] as bigint).toString(),
-        },
+        valueUsd: null,
+        uncollectedFeesUsd: null,
+        composition: null,
+        valuationError: 'unavailable',
       };
-    }
-    return undefined;
+    const principalUsd = BigInt(valuation[5] as bigint);
+    const feesUsd = BigInt(valuation[6] as bigint);
+    return {
+      ...position,
+      status: 'wallet',
+      valueUsd: (principalUsd + feesUsd).toString(),
+      uncollectedFeesUsd: feesUsd.toString(),
+      composition: {
+        amount0: BigInt(valuation[1] as bigint).toString(),
+        amount1: BigInt(valuation[2] as bigint).toString(),
+        fees0: BigInt(valuation[3] as bigint).toString(),
+        fees1: BigInt(valuation[4] as bigint).toString(),
+      },
+    };
   }
 
   private async enrichLoan(loan: Loan) {
@@ -204,11 +259,6 @@ type Loan = {
   tokenId: string;
   poolId: string;
   status: string;
-};
-type PortfolioData = {
-  positions: { items: Array<Record<string, unknown>> };
-  loans: { items: Loan[] };
-  vaultBalances: { items: Array<{ market: `0x${string}`; shares: string }> };
 };
 type MulticallResult =
   | { status: 'success'; result: unknown }
