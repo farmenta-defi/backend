@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { createPublicClient, http, PublicClient } from 'viem';
+import { Abi, Address, createPublicClient, http, PublicClient } from 'viem';
 import { SettingsService } from '../config/settings.service.js';
 
 @Injectable()
@@ -13,4 +13,10 @@ export class RpcService {
   getBlockNumber(): Promise<bigint> {
     return this.client.getBlockNumber();
   }
+
+  readContract<T>(address: Address, abi: Abi, functionName: string, args: readonly unknown[] = [], blockNumber?: bigint): Promise<T> {
+    return this.client.readContract({ address, abi, functionName, args, blockNumber } as never) as Promise<T>;
+  }
+
+  get clientForRead(): PublicClient { return this.client; }
 }
