@@ -7,9 +7,9 @@ import { lensAbi, marketAbi, policyAbi, valuerAbi } from '../markets/contracts.j
 import { DeploymentService } from '../markets/deployment.service.js';
 
 const PORTFOLIO = `query Portfolio($owner: String!) {
-  positions(where: { owner: { equals: $owner } }) { items { tokenId poolId tickLower tickUpper liquidity } }
-  loans(where: { owner: { equals: $owner }, status: { equals: "in_custody" } }) { items { market tokenId poolId status } }
-  vaultBalances(where: { account: { equals: $owner } }) { items { market shares } }
+  positions(where: { owner: $owner }) { items { tokenId poolId tickLower tickUpper liquidity } }
+  loans(where: { owner: $owner, status: "in_custody" }) { items { market tokenId poolId status } }
+  vaultBalances(where: { account: $owner }) { items { market shares } }
 }`;
 
 @Injectable()
@@ -30,26 +30,31 @@ export class PortfolioService {
   private async isListedPosition(position: Record<string, unknown>) {
     const poolId = position.poolId;
     if (typeof poolId !== 'string') return false;
-    const listings = await Promise.all(this.deployments.all().map(async ([, market]) => {
-      try { return (await this.rpc.readContract<{ listed: boolean }>(market.policy, policyAbi, 'listingOf', [poolId])).listed; } catch { return false; }
+    const listings = await Promise.all(this.deployments.all().map(async ([, raw]) => {
+      const market = await this.deployments.resolve(raw);
+      return (await this.rpc.readContract<{ listed: boolean }>(market.policy, policyAbi, 'listingOf', [poolId])).listed;
     }));
     return listings.some(Boolean);
   }
 
   private async enrichLoan(loan: Loan) {
-    const deployment = this.deployments.all().map(([, value]) => value).find((value) => value.address.toLowerCase() === loan.market.toLowerCase());
+    const deployment = await Promise.all(this.deployments.all().map(([, value]) => this.deployments.resolve(value))).then((markets) => markets.find((value) => value.address.toLowerCase() === loan.market.toLowerCase()));
     if (!deployment) return { ...loan, status: 'in_custody' };
     const tokenId = BigInt(loan.tokenId);
-    const [debt, collateralUsd, healthFactor, valuation] = await this.rpc.multicall([
+    const calls = await this.rpc.multicall([
       { address: deployment.address, abi: marketAbi, functionName: 'debtOf', args: [tokenId] },
       { address: deployment.lens, abi: lensAbi, functionName: 'positionValue', args: [tokenId] },
       { address: deployment.lens, abi: lensAbi, functionName: 'healthFactor', args: [tokenId] },
       { address: deployment.valuer, abi: valuerAbi, functionName: 'value', args: [tokenId] },
-    ]) as [bigint, bigint, bigint, readonly unknown[]];
+    ]) as MulticallResult[];
+    const [debt, collateralUsd, healthFactor, valuation] = calls.map(resultOf) as [bigint | null, bigint | null, bigint | null, readonly unknown[] | null];
     // IPositionValuer.Valuation: feesUsd is index 6 and intentionally has no 10% cap.
-    return { ...loan, debtUsdg: debt.toString(), collateralUsd: collateralUsd.toString(), uncollectedFeesUsd: BigInt(valuation[6] as bigint).toString(), healthFactor: healthFactor.toString(), status: 'in_custody' };
+    if (!valuation || collateralUsd === null || debt === null || healthFactor === null) return { ...loan, debtUsdg: debt?.toString() ?? null, collateralUsd: null, uncollectedFeesUsd: null, healthFactor: null, valuationError: 'unavailable', status: 'in_custody' };
+    return { ...loan, debtUsdg: debt.toString(), collateralUsd: collateralUsd.toString(), uncollectedFeesUsd: BigInt(valuation[6] as bigint).toString(), healthFactor: healthFactor === (2n ** 256n - 1n) ? null : healthFactor.toString(), status: 'in_custody' };
   }
 }
 
 type Loan = { market: `0x${string}`; tokenId: string; poolId: string; status: string };
 type PortfolioData = { positions: { items: Array<Record<string, unknown>> }; loans: { items: Loan[] }; vaultBalances: { items: Array<{ market: `0x${string}`; shares: string }> } };
+type MulticallResult = { status: 'success'; result: unknown } | { status: 'failure'; error: unknown };
+function resultOf(call: MulticallResult) { return call.status === 'success' ? call.result : null; }

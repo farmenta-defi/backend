@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { Abi, Address, createPublicClient, http, PublicClient } from 'viem';
 import { SettingsService } from '../config/settings.service.js';
 
@@ -14,15 +14,15 @@ export class RpcService {
   }
 
   getBlockNumber(): Promise<bigint> {
-    return this.client.getBlockNumber();
+    return this.client.getBlockNumber().catch(() => { throw new ServiceUnavailableException('RPC is unavailable'); });
   }
 
   readContract<T>(address: Address, abi: Abi, functionName: string, args: readonly unknown[] = [], blockNumber?: bigint): Promise<T> {
-    return this.client.readContract({ address, abi, functionName, args, blockNumber } as never) as Promise<T>;
+    return this.client.readContract({ address, abi, functionName, args, blockNumber } as never).catch(() => { throw new ServiceUnavailableException('RPC is unavailable'); }) as Promise<T>;
   }
 
   async multicall(contracts: Array<{ address: Address; abi: Abi; functionName: string; args?: readonly unknown[] }>) {
-    return this.client.multicall({ contracts: contracts as never, allowFailure: false, multicallAddress: MULTICALL3 }) as Promise<unknown[]>;
+    return this.client.multicall({ contracts: contracts as never, allowFailure: true, multicallAddress: MULTICALL3 }).catch(() => { throw new ServiceUnavailableException('RPC is unavailable'); }) as Promise<unknown[]>;
   }
 
   get clientForRead(): PublicClient { return this.client; }

@@ -4,12 +4,12 @@ import { IndexerService } from '../indexer/indexer.service.js';
 import { RpcService } from '../rpc/rpc.service.js';
 import { TtlCacheService } from '../shared/ttl-cache.service.js';
 import { marketAbi, policyAbi, rateModelAbi } from './contracts.js';
-import { DeploymentService, MarketDeployment } from './deployment.service.js';
+import { DeploymentService, ResolvedMarketDeployment } from './deployment.service.js';
 import { MarketRepository, Snapshot } from './market.repository.js';
 
 const YEAR = 31_536_000n;
 const WAD = 10n ** 18n;
-const POOLS = `query Pools { pools { items { id currency0 currency1 fee tickSpacing hooks tier maxLtvBps ltBps liquidatorBonusBps removeHaircutBps debtCapUsdg minPositionUsd frozen } } }`;
+const POOLS = `query Pools($after: String) { pools(limit: 1000, after: $after) { items { id currency0 currency1 fee tickSpacing hooks tier maxLtvBps ltBps liquidatorBonusBps removeHaircutBps debtCapUsdg minPositionUsd frozen } pageInfo { hasNextPage endCursor } } }`;
 
 @Injectable()
 export class MarketsService implements OnModuleInit, OnModuleDestroy {
@@ -20,15 +20,18 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   onModuleDestroy() { if (this.timer) clearInterval(this.timer); }
 
   async markets() {
-    return this.cache.get('markets', async () => Promise.all(this.deployments.all().map(async ([tier, deployment]) => ({
+    return this.cache.get('markets', async () => Promise.all(this.deployments.all().map(async ([tier, raw]) => {
+      const deployment = await this.deployments.resolve(raw);
+      return {
       tier, market: deployment.address, snapshot: await this.latestOrCapture(tier, deployment), history: await this.repository.history(deployment.address),
-    }))));
+      };
+    })));
   }
 
   async pools(tier: string) {
-    const market = this.deployments.get(tier);
-    const pools = await this.indexer.query<{ pools: { items: Pool[] } }>(POOLS, {}, 'pools');
-    const listed = await Promise.all(pools.pools.items.filter((pool) => pool.tier === market.tier).map(async (pool) => (await this.isListed(market, pool.id)) ? pool : undefined));
+    const market = await this.deployments.get(tier);
+    const pools = await this.allPools();
+    const listed = await Promise.all(pools.filter((pool) => pool.tier === market.tier).map(async (pool) => (await this.isListed(market, pool.id)) ? pool : undefined));
     return listed.filter((pool): pool is Pool => Boolean(pool));
   }
 
@@ -38,19 +41,23 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
     const entry = found.find((item) => item.pool);
     if (!entry?.pool) throw new NotFoundException('Pool is not listed');
     const pool = entry.pool;
-    const market = this.deployments.get(entry.tier);
+    const market = await this.deployments.get(entry.tier);
     const debt = await this.rpc.readContract<bigint>(market.address, marketAbi, 'poolDebt', [pool.id]);
     return { ...pool, tierName: entry.tier, market: market.address, totalBorrowUsdg: debt.toString(), marketSizeUsdg: String(pool.debtCapUsdg) };
   }
 
-  private async captureAll() { await Promise.all(this.deployments.all().map(([tier, market]) => this.capture(tier, market))); }
-  private async latestOrCapture(tier: string, market: MarketDeployment) {
-    const history = await this.repository.history(market.address);
-    const latest = history.at(-1);
+  private async allPools(after?: string, result: Pool[] = []): Promise<Pool[]> {
+    const page = await this.indexer.query<{ pools: { items: Pool[]; pageInfo: { hasNextPage: boolean; endCursor?: string } } }>(POOLS, { after }, `pools:${after ?? ''}`);
+    const next = [...result, ...page.pools.items];
+    return page.pools.pageInfo.hasNextPage ? this.allPools(page.pools.pageInfo.endCursor, next) : next;
+  }
+  private async captureAll() { await Promise.all(this.deployments.all().map(async ([tier, market]) => this.capture(tier, await this.deployments.resolve(market)))); }
+  private async latestOrCapture(tier: string, market: ResolvedMarketDeployment) {
+    const latest = await this.repository.latest(market.address);
     if (latest && Date.now() - Date.parse(latest.observedAt) <= 300_000) return latest;
     return this.capture(tier, market);
   }
-  private async capture(tier: string, market: MarketDeployment): Promise<Snapshot> {
+  private async capture(tier: string, market: ResolvedMarketDeployment): Promise<Snapshot> {
     const block = await this.rpc.getBlockNumber();
     const [totalAssets, totalBorrows, reserves, rateModel] = await Promise.all([
       this.rpc.readContract<bigint>(market.address, marketAbi, 'totalAssets', [], block), this.rpc.readContract<bigint>(market.address, marketAbi, 'totalBorrows', [], block), this.rpc.readContract<bigint>(market.address, marketAbi, 'reserves', [], block), this.rpc.readContract<Address>(market.address, marketAbi, 'interestRateModel', [], block),
@@ -66,9 +73,11 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
     await this.repository.insert(snapshot);
     return snapshot;
   }
-  private async isListed(market: MarketDeployment, poolId: string) {
-    const listing = await this.rpc.readContract<{ listed: boolean }>(market.policy, policyAbi, 'listingOf', [poolId]);
-    return listing.listed;
+  private async isListed(market: ResolvedMarketDeployment, poolId: string) {
+    return this.cache.get(`listing:${market.policy}:${poolId}`, async () => {
+      const listing = await this.rpc.readContract<{ listed: boolean }>(market.policy, policyAbi, 'listingOf', [poolId]);
+      return listing.listed;
+    });
   }
 }
 

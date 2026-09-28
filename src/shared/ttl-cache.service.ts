@@ -8,6 +8,7 @@ export class TtlCacheService {
   private readonly entries = new Map<string, Entry<unknown>>();
 
   get<T>(key: string, load: () => Promise<T>, ttlMs = 30_000): Promise<T> {
+    this.prune();
     const current = this.entries.get(key) as Entry<T> | undefined;
     if (current && current.expiresAt > Date.now()) return current.value;
     const value = load().catch((error) => {
@@ -16,5 +17,11 @@ export class TtlCacheService {
     });
     this.entries.set(key, { value, expiresAt: Date.now() + Math.min(ttlMs, 30_000) });
     return value;
+  }
+
+  private prune() {
+    const now = Date.now();
+    for (const [key, entry] of this.entries) if (entry.expiresAt <= now) this.entries.delete(key);
+    while (this.entries.size >= 1_000) this.entries.delete(this.entries.keys().next().value!);
   }
 }

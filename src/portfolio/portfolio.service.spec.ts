@@ -15,11 +15,11 @@ describe('PortfolioService', () => {
         if (functionName === 'convertToAssets') return BigInt(args[0] as string);
         throw new Error(`unexpected ${functionName}`);
       }),
-      multicall: vi.fn(async () => [25n, 110n, 2n * 10n ** 18n, [0n, 0n, 0n, 0n, 0n, 100n, 80n, 0n]]),
+      multicall: vi.fn(async () => [{ status: 'success', result: 25n }, { status: 'success', result: 110n }, { status: 'success', result: 2n * 10n ** 18n }, { status: 'success', result: [0n, 0n, 0n, 0n, 0n, 100n, 80n, 0n] }]),
     };
     const service = new PortfolioService(
       { query: vi.fn().mockResolvedValue({ positions: { items: [{ tokenId: '1', poolId: `0x${'a'.repeat(64)}` }, { tokenId: '2', poolId: `0x${'b'.repeat(64)}` }] }, loans: { items: [{ market, tokenId: '3', poolId: `0x${'c'.repeat(64)}`, status: 'in_custody' }] }, vaultBalances: { items: [] } }) },
-      { all: () => [['blueChip', { address: market, policy, lens: '0x0000000000000000000000000000000000000003', valuer: '0x0000000000000000000000000000000000000004', tier: 1 }]] }, rpc,
+      { all: () => [['blueChip', { address: market, policy, lens: '0x0000000000000000000000000000000000000003', valuer: '0x0000000000000000000000000000000000000004', tier: 1 }]], resolve: async (deployment: unknown) => deployment }, rpc,
       { get: (_key: string, load: () => Promise<unknown>) => load() },
     );
     const result = await service.portfolio('0x00000000000000000000000000000000000000aa');

@@ -9,9 +9,9 @@ describe('MarketsService', () => {
       .mockResolvedValueOnce(0n) // reserves
       .mockResolvedValueOnce('0x0000000000000000000000000000000000000001') // rate model
       .mockResolvedValueOnce(10n ** 18n / 31_536_000n); // 100% annual borrow rate
-    const repository = { history: vi.fn().mockResolvedValue([]), insert: vi.fn().mockResolvedValue(undefined) };
+    const repository = { history: vi.fn().mockResolvedValue([]), latest: vi.fn().mockResolvedValue(undefined), insert: vi.fn().mockResolvedValue(undefined) };
     const service = new MarketsService(
-      { all: () => [['blueChip', { address: '0x0000000000000000000000000000000000000002', policy: '0x0000000000000000000000000000000000000003', lens: '0x0000000000000000000000000000000000000004', valuer: '0x0000000000000000000000000000000000000005', tier: 1 }]], get: vi.fn() },
+      { all: () => [['blueChip', { address: '0x0000000000000000000000000000000000000002', policy: '0x0000000000000000000000000000000000000003', lens: '0x0000000000000000000000000000000000000004', valuer: '0x0000000000000000000000000000000000000005', tier: 1 }]], resolve: async (market: unknown) => market, get: vi.fn() },
       { readContract: reads, getBlockNumber: vi.fn().mockResolvedValue(99n) }, { query: vi.fn() }, repository,
       { get: (_key: string, load: () => Promise<unknown>) => load() },
     );
