@@ -12,9 +12,9 @@ import {
 import { DeploymentService } from '../markets/deployment.service.js';
 
 const PORTFOLIO = `query Portfolio($owner: String!) {
-  positions(where: { owner: $owner }) { items { tokenId poolId tickLower tickUpper liquidity } }
-  loans(where: { owner: $owner, status: "in_custody" }) { items { market tokenId poolId status } }
-  vaultBalances(where: { account: $owner }) { items { market shares } }
+  positions(where: { owner: $owner }, limit: 1000) { items { tokenId poolId tickLower tickUpper liquidity } }
+  loans(where: { owner: $owner, status: "in_custody" }, limit: 1000) { items { market tokenId poolId status } }
+  vaultBalances(where: { account: $owner }, limit: 1000) { items { market shares } }
 }`;
 
 @Injectable()

@@ -17,9 +17,9 @@ describe('ActivityService', () => {
       rows('vault', 202),
     ];
     const indexer = {
-      query: vi.fn(async (query: string) => {
-        const cursor = /logIndex_lt: (\d+)/.exec(query)?.[1];
-        const threshold = cursor === undefined ? Infinity : Number(cursor);
+      query: vi.fn(async (_query: string, variables: { logIndex?: number }) => {
+        const threshold =
+          variables.logIndex === undefined ? Infinity : variables.logIndex;
         const items = sources.map((source) =>
           source
             .filter((item) => item.logIndex < threshold)
@@ -27,14 +27,22 @@ describe('ActivityService', () => {
             .slice(0, 101),
         );
         return {
-          loanActivitys: { items: items[0] },
-          liquidations: { items: items[1] },
-          vaultActivitys: { items: items[2] },
+          loan_blueChip: { items: items[0] },
+          liquidation_blueChip: { items: items[1] },
+          vault_blueChip: { items: items[2] },
         };
       }),
     };
     const service = new ActivityService(
       indexer as never,
+      {
+        all: () => [
+          [
+            'blueChip',
+            { address: '0x0000000000000000000000000000000000000001' },
+          ],
+        ],
+      } as never,
       { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
     );
 
@@ -53,6 +61,8 @@ describe('ActivityService', () => {
         [...first.items, ...second.items].map((item) => item.transactionHash),
       ),
     ).toHaveLength(200);
-    expect(indexer.query.mock.calls[1][0]).toContain('logIndex_lt: 203');
+    expect(indexer.query.mock.calls[1][0]).toContain(
+      'blockNumber: $blockNumber',
+    );
   });
 });

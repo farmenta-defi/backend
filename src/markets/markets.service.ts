@@ -19,7 +19,11 @@ import {
   DeploymentService,
   ResolvedMarketDeployment,
 } from './deployment.service.js';
-import { MarketRepository, Snapshot } from './market.repository.js';
+import {
+  HistoryRange,
+  MarketRepository,
+  Snapshot,
+} from './market.repository.js';
 
 const YEAR = 31_536_000n;
 const WAD = 10n ** 18n;
@@ -45,8 +49,8 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
     if (this.timer) clearInterval(this.timer);
   }
 
-  async markets() {
-    return this.cache.get('markets', async () =>
+  async markets(range: HistoryRange = '1w') {
+    return this.cache.get(`markets:${range}`, async () =>
       Promise.all(
         this.deployments.all().map(async ([tier, raw]) => {
           const deployment = await this.deployments.resolve(raw);
@@ -54,7 +58,7 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
             tier,
             market: deployment.address,
             snapshot: await this.latestOrCapture(tier, deployment),
-            history: await this.repository.history(deployment.address),
+            history: await this.repository.history(deployment.address, range),
           };
         }),
       ),
@@ -62,6 +66,9 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async pools(tier: string): Promise<ListedPool[]> {
+    return this.cache.get(`pools:${tier}`, () => this.loadPools(tier));
+  }
+  private async loadPools(tier: string): Promise<ListedPool[]> {
     const market = await this.deployments.get(tier);
     const pools = await this.allPools();
     const listed = await Promise.all(
@@ -83,9 +90,14 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
     return listed.filter((pool): pool is ListedPool => Boolean(pool));
   }
 
-  async pool(poolId: string) {
+  async pool(poolId: string, range: HistoryRange = '1w') {
     if (!isHex(poolId, { strict: true }) || poolId.length !== 66)
       throw new NotFoundException('Pool is not listed');
+    return this.cache.get(`pool:${poolId.toLowerCase()}:${range}`, () =>
+      this.loadPool(poolId, range),
+    );
+  }
+  private async loadPool(poolId: string, range: HistoryRange) {
     const found = await Promise.all(
       this.deployments.all().map(async ([tier]) => ({
         tier,
@@ -110,7 +122,7 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
       market: market.address,
       totalBorrowUsdg: debt.toString(),
       marketSizeUsdg: String(pool.debtCapUsdg),
-      history: await this.repository.history(market.address),
+      history: await this.repository.history(market.address, range),
     };
   }
 

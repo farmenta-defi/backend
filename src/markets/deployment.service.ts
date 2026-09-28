@@ -24,6 +24,10 @@ export type ResolvedMarketDeployment = {
 @Injectable()
 export class DeploymentService {
   private readonly markets: Record<string, MarketDeployment>;
+  private readonly resolved = new Map<
+    string,
+    Promise<ResolvedMarketDeployment>
+  >();
 
   constructor(
     settings: SettingsService,
@@ -61,15 +65,19 @@ export class DeploymentService {
     return this.resolve(market);
   }
   async resolve(market: MarketDeployment): Promise<ResolvedMarketDeployment> {
-    const [policy, valuer, tier] = await Promise.all([
+    const key = market.address.toLowerCase();
+    const cached = this.resolved.get(key);
+    if (cached) return cached;
+    const value = Promise.all([
       market.policy ??
         this.rpc.readContract<Address>(market.address, marketAbi, 'policy'),
       market.valuer ??
         this.rpc.readContract<Address>(market.address, marketAbi, 'valuer'),
       market.tier ??
         this.rpc.readContract<number>(market.address, marketAbi, 'tier'),
-    ]);
-    return { ...market, policy, valuer, tier };
+    ]).then(([policy, valuer, tier]) => ({ ...market, policy, valuer, tier }));
+    this.resolved.set(key, value);
+    return value;
   }
 }
 
