@@ -6,29 +6,100 @@ describe('PortfolioService', () => {
     const market = '0x0000000000000000000000000000000000000001';
     const policy = '0x0000000000000000000000000000000000000002';
     const rpc = {
-      readContract: vi.fn(async (_address: string, _abi: unknown, functionName: string, args: readonly unknown[]) => {
-        if (functionName === 'listingOf') return { listed: true };
-        if (functionName === 'debtOf') return 25n;
-        if (functionName === 'positionValue') return 110n; // principal 100 + fee capped at 10
-        if (functionName === 'healthFactor') return 2n * 10n ** 18n;
-        if (functionName === 'value') return [0n, 0n, 0n, 0n, 0n, 100n, 80n, 0n]; // fee > 10% principal
-        if (functionName === 'convertToAssets') return BigInt(args[0] as string);
-        throw new Error(`unexpected ${functionName}`);
-      }),
-      multicall: vi.fn(async () => [{ status: 'success', result: 25n }, { status: 'success', result: 110n }, { status: 'success', result: 2n * 10n ** 18n }, { status: 'success', result: [0n, 0n, 0n, 0n, 0n, 100n, 80n, 0n] }]),
+      readContract: vi.fn(
+        async (
+          _address: string,
+          _abi: unknown,
+          functionName: string,
+          args: readonly unknown[],
+        ) => {
+          if (functionName === 'listingOf') return { listed: true };
+          if (functionName === 'debtOf') return 25n;
+          if (functionName === 'positionValue') return 110n; // principal 100 + fee capped at 10
+          if (functionName === 'healthFactor') return 2n * 10n ** 18n;
+          if (functionName === 'value')
+            return [0n, 0n, 0n, 0n, 0n, 100n, 80n, 0n]; // fee > 10% principal
+          if (functionName === 'convertToAssets')
+            return BigInt(args[0] as string);
+          throw new Error(`unexpected ${functionName}`);
+        },
+      ),
+      multicall: vi.fn(async (calls: unknown[]) =>
+        calls.length === 1
+          ? [{ status: 'success', result: [0n, 1n, 2n, 3n, 4n, 100n, 80n, 0n] }]
+          : [
+              { status: 'success', result: 25n },
+              { status: 'success', result: 110n },
+              { status: 'success', result: 2n * 10n ** 18n },
+              {
+                status: 'success',
+                result: [0n, 1n, 2n, 3n, 4n, 100n, 80n, 0n],
+              },
+            ],
+      ),
     };
     const service = new PortfolioService(
-      { query: vi.fn().mockResolvedValue({ positions: { items: [{ tokenId: '1', poolId: `0x${'a'.repeat(64)}` }, { tokenId: '2', poolId: `0x${'b'.repeat(64)}` }] }, loans: { items: [{ market, tokenId: '3', poolId: `0x${'c'.repeat(64)}`, status: 'in_custody' }] }, vaultBalances: { items: [] } }) },
-      { all: () => [['blueChip', { address: market, policy, lens: '0x0000000000000000000000000000000000000003', valuer: '0x0000000000000000000000000000000000000004', tier: 1 }]], resolve: async (deployment: unknown) => deployment }, rpc,
+      {
+        query: vi.fn().mockResolvedValue({
+          positions: {
+            items: [
+              { tokenId: '1', poolId: `0x${'a'.repeat(64)}` },
+              { tokenId: '2', poolId: `0x${'b'.repeat(64)}` },
+            ],
+          },
+          loans: {
+            items: [
+              {
+                market,
+                tokenId: '3',
+                poolId: `0x${'c'.repeat(64)}`,
+                status: 'in_custody',
+              },
+            ],
+          },
+          vaultBalances: { items: [] },
+        }),
+      },
+      {
+        all: () => [
+          [
+            'blueChip',
+            {
+              address: market,
+              policy,
+              lens: '0x0000000000000000000000000000000000000003',
+              valuer: '0x0000000000000000000000000000000000000004',
+              tier: 1,
+            },
+          ],
+        ],
+        resolve: async (deployment: unknown) => deployment,
+      },
+      rpc,
       { get: (_key: string, load: () => Promise<unknown>) => load() },
     );
-    const result = await service.portfolio('0x00000000000000000000000000000000000000aa');
+    const result = await service.portfolio(
+      '0x00000000000000000000000000000000000000aa',
+    );
     expect(result.positions).toHaveLength(3);
-    expect(result.positions).toEqual(expect.arrayContaining([
-      expect.objectContaining({ tokenId: '1', status: 'wallet' }),
-      expect.objectContaining({ tokenId: '2', status: 'wallet' }),
-      expect.objectContaining({ tokenId: '3', status: 'in_custody', collateralUsd: '110', uncollectedFeesUsd: '80' }),
-    ]));
-    expect(rpc.multicall).toHaveBeenCalledOnce();
+    expect(result.positions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          tokenId: '1',
+          status: 'wallet',
+          valueUsd: '180',
+          uncollectedFeesUsd: '80',
+          composition: { amount0: '1', amount1: '2', fees0: '3', fees1: '4' },
+        }),
+        expect.objectContaining({ tokenId: '2', status: 'wallet' }),
+        expect.objectContaining({
+          tokenId: '3',
+          status: 'in_custody',
+          collateralUsd: '110',
+          uncollectedFeesUsd: '80',
+        }),
+      ]),
+    );
+    expect(rpc.multicall).toHaveBeenCalledTimes(3);
   });
 });
