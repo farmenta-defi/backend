@@ -1,3 +1,12 @@
 {
-  "marketLens": "0x0000000000000000000000000000000000000000"
+  "collateralPolicy": { "address": "0x0000000000000000000000000000000000000000", "startBlock": 0 },
+  "markets": {
+    "blueChip": {
+      "address": "0x0000000000000000000000000000000000000000",
+      "startBlock": 0
+    }
+  },
+  "lenses": {
+    "blueChip": { "address": "0x0000000000000000000000000000000000000000", "startBlock": 0 }
+  }
 }

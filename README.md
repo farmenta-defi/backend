@@ -27,7 +27,8 @@ remain mode 600.
 bun install
 cp .env.example .env
 chmod 600 .env
-# Fill DATABASE_URL, RPC_URL, INDEXER_STATUS_URL, and CORS_ORIGINS.
+# Fill DATABASE_URL, RPC_URL, INDEXER_STATUS_URL, INDEXER_GRAPHQL_URL, CORS_ORIGINS,
+# and FARMENTA_DEPLOYMENT after contracts are deployed.
 bun run db:migrate
 bun run src/main.ts
 ```
