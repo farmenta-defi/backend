@@ -22,6 +22,16 @@ afterEach(async () => {
 });
 
 describe('backend indexer queries against Ponder 0.17.10', () => {
+  it('rejects fields that are absent from the pinned indexer schema', async () => {
+    const indexer = await withIndexer(() => []);
+
+    await expect(
+      indexer.indexer.query(
+        '{ positions { items { fieldMissingFromPinnedSchema } } }',
+      ),
+    ).rejects.toMatchObject({ status: 503 });
+  });
+
   it('reads every activity row once in block and log order for limits 1, 25, and 100', async () => {
     const events = Array.from({ length: 135 }, (_, index) => ({
       index,
