@@ -62,6 +62,13 @@ export async function startPonderIndexer(
   const graphqlSchema = buildGraphQLSchema({ schema });
   const requests: PonderIndexer['requests'] = [];
   const server: Server = createServer(async (request, response) => {
+    if (request.url === '/status') {
+      response.writeHead(200, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({ robinhood: { block: { timestamp: Math.floor(Date.now() / 1_000) } } }),
+      );
+      return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = JSON.parse(Buffer.concat(chunks).toString('utf8')) as {
@@ -97,7 +104,11 @@ export async function startPonderIndexer(
   const { TtlCacheService } =
     await import('../../src/shared/ttl-cache.service.js');
   const indexer = new IndexerService(
-    { indexerGraphqlUrl: `http://127.0.0.1:${port}/graphql` } as never,
+    {
+      indexerGraphqlUrl: `http://127.0.0.1:${port}/graphql`,
+      indexerStatusUrl: `http://127.0.0.1:${port}/status`,
+      maxIndexerLagSeconds: 60,
+    } as never,
     new TtlCacheService(),
   );
 

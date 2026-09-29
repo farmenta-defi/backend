@@ -253,7 +253,6 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
     const service = new ActivityService(
       indexer.indexer as never,
       deployments as never,
-      new TtlCacheService(),
     );
     const expected = events
       .map((event) => ({
