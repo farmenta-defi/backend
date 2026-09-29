@@ -55,6 +55,42 @@ describe('AppController (e2e)', () => {
       .then(() => expect(fetch).not.toHaveBeenCalled());
   });
 
+  it.each([
+    ['below threshold', 59, 200],
+    ['at threshold', 60, 200],
+    ['above threshold', 61, 503],
+  ])(
+    'gates an indexer-backed route when lag is %s',
+    async (_case, lag, status) => {
+      const fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.endsWith('/status')) {
+          return {
+            ok: true,
+            json: async () => ({
+              robinhood: {
+                block: { timestamp: Math.floor(Date.now() / 1_000) - lag },
+              },
+            }),
+          };
+        }
+        return { ok: true, json: async () => ({ data: {} }) };
+      });
+      vi.stubGlobal('fetch', fetch);
+
+      const response = await request(app.getHttpServer())
+        .get('/activity/0x00000000000000000000000000000000000000aa')
+        .expect(status);
+
+      if (status === 200)
+        expect(response.body).toMatchObject({
+          items: [],
+          nextCursor: null,
+          hasMore: false,
+        });
+      expect(fetch).toHaveBeenCalledTimes(lag > 60 ? 1 : 2);
+    },
+  );
+
   it('rejects an origin outside the frontend allowlist', () => {
     return request(app.getHttpServer())
       .get('/health')
