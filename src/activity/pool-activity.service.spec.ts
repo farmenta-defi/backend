@@ -17,7 +17,7 @@ describe('PoolActivityService', () => {
       const indexer = {
         assertFresh: vi.fn(async () => undefined),
         query: vi.fn(async (_query: string, _variables: Record<string, unknown>) => ({
-          loanActivitys: {
+          loanActivity_0: {
             items: [{
               market: MARKET,
               poolId: POOL,
@@ -31,7 +31,7 @@ describe('PoolActivityService', () => {
               amountUsdg: '1230000',
             }],
           },
-          liquidations: { items: [] },
+          liquidations_0: { items: [] },
         })),
       };
       const service = makeService(indexer);
@@ -76,7 +76,7 @@ describe('PoolActivityService', () => {
     it('returns an empty first page and validates the inclusive pagination bounds', async () => {
       const service = makeService({
         assertFresh: vi.fn(async () => undefined),
-        query: vi.fn(async () => ({ loanActivitys: { items: [] }, liquidations: { items: [] } })),
+        query: vi.fn(async () => ({ loanActivity_0: { items: [] }, liquidations_0: { items: [] } })),
       });
 
       await expect(service.activity(POOL, 1, 'not-a-cursor')).rejects.toBeInstanceOf(BadRequestException);
@@ -90,13 +90,13 @@ describe('PoolActivityService', () => {
 function makeService(
   indexer: unknown = {
     assertFresh: vi.fn(async () => undefined),
-    query: vi.fn(async () => ({ loanActivitys: { items: [] }, liquidations: { items: [] } })),
+    query: vi.fn(async () => ({ loanActivity_0: { items: [] }, liquidations_0: { items: [] } })),
   },
   listed = true,
 ) {
   return new PoolActivityService(
     indexer as never,
-    { findListedMarket: vi.fn(async () => listed ? { address: MARKET } : undefined) } as never,
+    { findListedMarkets: vi.fn(async () => listed ? [{ address: MARKET }] : []) } as never,
     new TtlCacheService(),
   );
 }

@@ -35,6 +35,7 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
     const events = [
       { kind: 'deposit', poolId, market: marketAddresses[0], block: 100, log: 1, owner },
       { kind: 'borrow', poolId, market: marketAddresses[0], block: 100, log: 4, owner: '0x00000000000000000000000000000000000000bb' },
+      { kind: 'withdraw', poolId, market: marketAddresses[1], block: 100, log: 6, owner: '0x00000000000000000000000000000000000000bb' },
       { kind: 'repay', poolId, market: marketAddresses[0], block: 100, log: 8, owner },
       { kind: 'borrow', poolId: otherPool, market: marketAddresses[0], block: 101, log: 1, owner },
       { kind: 'borrow', poolId, market: marketAddresses[1], block: 102, log: 1, owner },
@@ -79,17 +80,18 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
         }];
       return [];
     });
-    const market = { address: marketAddresses[0] };
     const service = new PoolActivityService(
       indexer.indexer as never,
-      { findListedMarket: vi.fn(async (id: string) => id === poolId || id === emptyPool ? market : undefined) } as never,
+      { findListedMarkets: vi.fn(async (id: string) => id === poolId || id === emptyPool
+        ? marketAddresses.map((address) => ({ address }))
+        : []) } as never,
       new TtlCacheService(),
     );
     const actual: Array<{ blockNumber: string; logIndex: number; kind: string; owner: string }> = [];
     let cursor: string | undefined;
     let hasMore = true;
     while (hasMore) {
-      const page = await service.activity(poolId, 2, cursor);
+      const page = await service.activity(poolId, 1, cursor);
       actual.push(...page.items as typeof actual);
       cursor = page.nextCursor ?? undefined;
       hasMore = page.hasMore;
@@ -99,11 +101,12 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
       { kind: 'borrow', blockNumber: '102', logIndex: 1 },
       { kind: 'liquidation', blockNumber: '100', logIndex: 11 },
       { kind: 'repay', blockNumber: '100', logIndex: 8 },
+      { kind: 'withdraw', blockNumber: '100', logIndex: 6 },
       { kind: 'borrow', blockNumber: '100', logIndex: 4 },
       { kind: 'deposit', blockNumber: '100', logIndex: 1 },
     ]);
     expect(actual.map(({ owner }) => owner)).toContain('0x00000000000000000000000000000000000000bb');
-    expect(new Set(actual.map(({ blockNumber, logIndex }) => `${blockNumber}:${logIndex}`)).size).toBe(5);
+    expect(new Set(actual.map(({ blockNumber, logIndex }) => `${blockNumber}:${logIndex}`)).size).toBe(6);
     expect(indexer.requests.some(({ query }) => query.includes('query PoolActivity('))).toBe(true);
 
     const borrows = await service.activity(poolId, 25, undefined, 'borrow');
@@ -305,7 +308,10 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
         all: () => [['blueChip', deployment]],
         resolve: async (market: unknown) => market,
       } as never,
-      { findListedMarket: async () => deployment } as never,
+      {
+        findListedMarket: async () => deployment,
+        findListedMarkets: async () => [deployment],
+      } as never,
       {
         multicall: vi.fn(async (calls: unknown[]) =>
           calls.map(() => ({

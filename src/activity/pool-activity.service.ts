@@ -25,18 +25,39 @@ type ActivityRow = {
   badDebtUsdg?: string;
   full?: boolean;
 };
-type PoolActivityData = {
-  loanActivitys?: { items: Array<Omit<ActivityRow, 'kind'> & { kind: string }> };
-  liquidations?: {
-    items: Array<
-      Omit<ActivityRow, 'kind' | 'amountUsdg'> & {
-        liquidator: string;
-        repaidUsdg: string;
-        badDebtUsdg: string;
-        full: boolean;
-      }
-    >;
-  };
+type PoolActivityData = Record<
+  string,
+  | { items: Array<Omit<ActivityRow, 'kind'> & { kind: string }> }
+  | {
+      items: Array<
+        Omit<ActivityRow, 'kind' | 'amountUsdg'> & {
+          liquidator: string;
+          repaidUsdg: string;
+          badDebtUsdg: string;
+          full: boolean;
+        }
+      >;
+    }
+>;
+
+type ActivityMarket = { address: string };
+
+type ActivityItem =
+  | (Omit<ActivityRow, 'kind'> & { kind: string })
+  | (Omit<ActivityRow, 'kind' | 'amountUsdg'> & {
+      liquidator: string;
+      repaidUsdg: string;
+      badDebtUsdg: string;
+      full: boolean;
+    });
+
+function itemsForMarkets<T extends ActivityItem>(
+  data: PoolActivityData,
+  prefix: string,
+): T[] {
+  return Object.entries(data)
+    .filter(([key]) => key.startsWith(`${prefix}_`))
+    .flatMap(([, result]) => result.items as T[]);
 };
 
 @Injectable()
@@ -64,7 +85,8 @@ export class PoolActivityService {
 
     const normalizedPoolId = poolId.toLowerCase();
     const normalizedKind = kind as PoolActivityKind | undefined;
-    if (!(await this.markets.findListedMarket(normalizedPoolId)))
+    const markets = await this.markets.findListedMarkets(normalizedPoolId);
+    if (markets.length === 0)
       throw new NotFoundException('Pool is not listed');
     await this.indexer.assertFresh();
     return this.cache.get(
@@ -72,22 +94,25 @@ export class PoolActivityService {
       async () => {
         const [blockNumber, logIndex] = cursor?.split(':') ?? [];
         const data = await this.indexer.query<PoolActivityData>(
-          poolActivityQuery(normalizedKind, cursor !== undefined),
+          poolActivityQuery(markets, normalizedKind, cursor !== undefined),
           {
             poolId: normalizedPoolId,
             limit: limit + 1,
+            ...Object.fromEntries(
+              markets.map((market, index) => [`market${index}`, market.address]),
+            ),
             ...(blockNumber !== undefined
               ? { blockNumber, logIndex: Number(logIndex) }
               : {}),
           },
         );
         const entries: ActivityRow[] = [
-          ...(data.loanActivitys?.items ?? []).map((item) => ({
+          ...itemsForMarkets<Omit<ActivityRow, 'kind'> & { kind: string }>(data, 'loanActivity').map((item) => ({
             ...item,
             kind: item.kind as PoolActivityKind,
             amountUsdg: item.amountUsdg ?? null,
           })),
-          ...(data.liquidations?.items ?? []).map((item) => ({
+          ...itemsForMarkets<Extract<ActivityItem, { liquidator: string }>>(data, 'liquidations').map((item) => ({
             ...item,
             kind: 'liquidation' as const,
             amountUsdg: null,
@@ -105,7 +130,11 @@ export class PoolActivityService {
   }
 }
 
-function poolActivityQuery(kind?: PoolActivityKind, hasCursor = false) {
+function poolActivityQuery(
+  markets: ActivityMarket[],
+  kind?: PoolActivityKind,
+  hasCursor = false,
+) {
   const cursorVariables = hasCursor
     ? ', $blockNumber: BigInt!, $logIndex: Int!'
     : '';
@@ -113,13 +142,18 @@ function poolActivityQuery(kind?: PoolActivityKind, hasCursor = false) {
     ? ', OR: [{ blockNumber_lt: $blockNumber }, { AND: [{ blockNumber: $blockNumber }, { logIndex_lt: $logIndex }] }]'
     : '';
   const loanKind = kind && kind !== 'liquidation' ? `, kind: "${kind}"` : '';
-  const loanQuery = kind === 'liquidation'
-    ? ''
-    : `loanActivitys(where: { poolId: $poolId${loanKind}${cursorFilter} }, orderBy: "blockNumber", orderDirection: "desc", limit: $limit) { items { market poolId blockNumber logIndex timestamp transactionHash tokenId owner kind amountUsdg } }`;
-  const liquidationQuery = kind && kind !== 'liquidation'
-    ? ''
-    : `liquidations(where: { poolId: $poolId${cursorFilter} }, orderBy: "blockNumber", orderDirection: "desc", limit: $limit) { items { market poolId blockNumber logIndex timestamp transactionHash tokenId owner liquidator full repaidUsdg badDebtUsdg } }`;
-  return `query PoolActivity($poolId: String!, $limit: Int!${cursorVariables}) { ${loanQuery} ${liquidationQuery} }`;
+  const marketVariables = markets.map((_, index) => `$market${index}: String!`).join(', ');
+  const queries = markets.flatMap((_, index) => {
+    const marketFilter = `market: $market${index}`;
+    const loanQuery = kind === 'liquidation'
+      ? ''
+      : `loanActivity_${index}: loanActivitys(where: { poolId: $poolId, ${marketFilter}${loanKind}${cursorFilter} }, orderBy: "blockNumber", orderDirection: "desc", limit: $limit) { items { market poolId blockNumber logIndex timestamp transactionHash tokenId owner kind amountUsdg } }`;
+    const liquidationQuery = kind && kind !== 'liquidation'
+      ? ''
+      : `liquidations_${index}: liquidations(where: { poolId: $poolId, ${marketFilter}${cursorFilter} }, orderBy: "blockNumber", orderDirection: "desc", limit: $limit) { items { market poolId blockNumber logIndex timestamp transactionHash tokenId owner liquidator full repaidUsdg badDebtUsdg } }`;
+    return [loanQuery, liquidationQuery].filter(Boolean);
+  });
+  return `query PoolActivity($poolId: String!, $limit: Int!${marketVariables ? `, ${marketVariables}` : ''}${cursorVariables}) { ${queries.join('\n')} }`;
 }
 
 function compareActivity(a: ActivityRow, b: ActivityRow) {

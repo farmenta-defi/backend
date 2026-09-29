@@ -294,11 +294,15 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   async findListedMarket(
     poolId: string,
   ): Promise<ResolvedMarketDeployment | undefined> {
+    return (await this.findListedMarkets(poolId))[0];
+  }
+  async findListedMarkets(poolId: string): Promise<ResolvedMarketDeployment[]> {
+    const listed: ResolvedMarketDeployment[] = [];
     for (const [, raw] of this.deployments.all()) {
       const market = await this.deployments.resolve(raw);
-      if (await this.isListed(market, poolId)) return market;
+      if (await this.isListed(market, poolId)) listed.push(market);
     }
-    return undefined;
+    return listed;
   }
 }
 
