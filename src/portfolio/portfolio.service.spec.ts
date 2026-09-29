@@ -2,6 +2,38 @@ import { describe, expect, it, vi } from 'vitest';
 import { PortfolioService } from './portfolio.service.js';
 
 describe('PortfolioService', () => {
+  it('rejects an invalid wallet address', async () => {
+    const service = new PortfolioService(
+      { query: vi.fn() } as never,
+      { all: () => [] } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(service.portfolio('not-an-address')).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('returns an empty portfolio at the no-indexed-positions edge', async () => {
+    const service = new PortfolioService(
+      {
+        query: vi.fn().mockResolvedValue({
+          positions: { items: [], pageInfo: { hasNextPage: false } },
+          loans: { items: [], pageInfo: { hasNextPage: false } },
+          vaultBalances: { items: [], pageInfo: { hasNextPage: false } },
+        }),
+      } as never,
+      { all: () => [] } as never,
+      {} as never,
+      {} as never,
+    );
+
+    await expect(
+      service.portfolio('0x00000000000000000000000000000000000000aa'),
+    ).resolves.toMatchObject({ positions: [], vaultShares: [] });
+  });
+
   it('batches listed wallet valuations and omits unlisted positions', async () => {
     const market = '0x0000000000000000000000000000000000000001';
     const policy = '0x0000000000000000000000000000000000000002';

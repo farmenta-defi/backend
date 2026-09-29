@@ -7,7 +7,7 @@ export class SettingsService {
   readonly rpcUrl = requireUrl('RPC_URL');
   readonly indexerStatusUrl = requireUrl('INDEXER_STATUS_URL');
   readonly indexerGraphqlUrl = requireUrl('INDEXER_GRAPHQL_URL');
-  readonly maxIndexerLagSeconds = positiveInteger(
+  readonly maxIndexerLagSeconds = nonNegativeInteger(
     process.env.INDEXER_MAX_LAG_SECONDS,
     60,
   );
@@ -19,7 +19,10 @@ export class SettingsService {
   readonly trustProxy = process.env.TRUST_PROXY === '1';
 }
 
-function positiveInteger(value: string | undefined, fallback: number): number {
+function nonNegativeInteger(
+  value: string | undefined,
+  fallback: number,
+): number {
   if (value === undefined || value === '') return fallback;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed < 0) {
