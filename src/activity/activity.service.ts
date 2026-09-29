@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { isAddress } from 'viem';
 import { IndexerService } from '../indexer/indexer.service.js';
 import { DeploymentService } from '../markets/deployment.service.js';
+import { parseActivityCursor } from './activity-cursor.js';
 
 @Injectable()
 export class ActivityService {
@@ -9,21 +10,21 @@ export class ActivityService {
     private readonly indexer: IndexerService,
     private readonly deployments: DeploymentService,
   ) {}
-  async activity(address: string, limit = 25, cursor?: string) {
+  async activity(address: string, limit = 25, cursor?: string | string[]) {
     if (!isAddress(address) || /^0x0{40}$/i.test(address))
       throw new BadRequestException('address must be a non-zero address');
     if (!Number.isInteger(limit) || limit < 1 || limit > 100)
       throw new BadRequestException('limit must be between 1 and 100');
-    if (cursor && !isCursor(cursor))
-      throw new BadRequestException('cursor must be blockNumber:logIndex');
+    const parsedCursor = parseActivityCursor(cursor);
+    const cursorValue = Array.isArray(cursor) ? cursor.join(',') : cursor;
     const markets = this.deployments.all().map(([name, market]) => ({
       name,
       address: market.address,
     }));
     const data = await this.indexer.query<ActivityData>(
-      activityQuery(markets, cursor),
-      activityVariables(address, limit, markets, cursor),
-      `activity:${address.toLowerCase()}:${limit}:${cursor ?? ''}`,
+      activityQuery(markets, cursorValue),
+      activityVariables(address, limit, markets, parsedCursor),
+      `activity:${address.toLowerCase()}:${limit}:${cursorValue ?? ''}`,
     );
     const entries = [
       ...activityItems(data, 'loan'),
@@ -59,15 +60,6 @@ function compareActivity(a: Activity, b: Activity) {
 function cursorOf(value: Activity) {
   return `${value.blockNumber}:${value.logIndex}`;
 }
-function isCursor(cursor: string) {
-  const [blockNumber, logIndex, extra] = cursor.split(':');
-  return (
-    extra === undefined &&
-    /^\d+$/.test(blockNumber ?? '') &&
-    /^\d+$/.test(logIndex ?? '')
-  );
-}
-
 function activityQuery(
   markets: Array<{ name: string; address: string }>,
   cursor?: string,
@@ -95,16 +87,17 @@ function activityVariables(
   address: string,
   limit: number,
   markets: Array<{ address: string }>,
-  cursor?: string,
+  cursor?: { blockNumber: string; logIndex: number },
 ) {
   const marketVariables = Object.fromEntries(
     markets.map((market, index) => [`market${index}`, market.address]),
   );
-  const [blockNumber, logIndex] = cursor?.split(':') ?? [];
   return {
     owner: address.toLowerCase(),
     limit: limit + 1,
-    ...(blockNumber ? { blockNumber, logIndex: Number(logIndex) } : {}),
+    ...(cursor
+      ? { blockNumber: cursor.blockNumber, logIndex: cursor.logIndex }
+      : {}),
     ...marketVariables,
   };
 }

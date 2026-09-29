@@ -9,7 +9,7 @@ export class PoolActivityController {
   get(
     @Param('poolId') poolId: string,
     @Query('limit') limit?: string,
-    @Query('cursor') cursor?: string,
+    @Query('cursor') cursor?: string | string[],
     @Query('kind') kind?: string,
   ) {
     return this.poolActivity.activity(

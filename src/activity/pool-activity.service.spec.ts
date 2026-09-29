@@ -46,6 +46,29 @@ describe('PoolActivityService', () => {
       expect(indexer.query.mock.calls[0]?.[0]).toContain('kind: "borrow"');
       expect(indexer.query.mock.calls[0]?.[0]).not.toContain('liquidations(');
     });
+
+    it('limits the default loan feed to supported pool activity kinds', async () => {
+      const indexer = {
+        assertFresh: vi.fn(async () => undefined),
+        query: vi.fn(async () => ({ loanActivity_0: { items: [] }, liquidations_0: { items: [] } })),
+      };
+      await makeService(indexer).activity(POOL);
+      const query = indexer.query.mock.calls[0]?.[0] ?? '';
+      expect(query).toContain('kind_in: ["deposit", "withdraw", "borrow", "repay"]');
+      expect(query).not.toContain('increase_liquidity');
+      expect(query).not.toContain('collect_fees');
+    });
+
+    it('skips loan activity entirely for liquidation-only requests', async () => {
+      const indexer = {
+        assertFresh: vi.fn(async () => undefined),
+        query: vi.fn(async () => ({ liquidations_0: { items: [] } })),
+      };
+      await makeService(indexer).activity(POOL, 25, undefined, 'liquidation');
+      const query = indexer.query.mock.calls[0]?.[0] ?? '';
+      expect(query).not.toContain('loanActivitys(');
+      expect(query).toContain('liquidations(');
+    });
   });
 
   describe('negative', () => {
@@ -80,6 +103,8 @@ describe('PoolActivityService', () => {
       });
 
       await expect(service.activity(POOL, 1, 'not-a-cursor')).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.activity(POOL, 25, ['1:1', '2:2'])).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.activity(POOL, 25, `1:${2_147_483_648}`)).rejects.toBeInstanceOf(BadRequestException);
       await expect(service.activity(POOL, 0)).rejects.toBeInstanceOf(BadRequestException);
       await expect(service.activity(POOL, 101)).rejects.toBeInstanceOf(BadRequestException);
       await expect(service.activity(POOL)).resolves.toMatchObject({ items: [], nextCursor: null, hasMore: false });

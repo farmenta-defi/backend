@@ -44,8 +44,10 @@ indexed block is older than that threshold.
 and liquidations for a listed pool across all owners. Results are ordered by block and log index,
 newest first, with `limit` (1–100, default 25), `cursor` (`blockNumber:logIndex`), and an optional
 `kind` filter. Amounts are decimal strings in the smallest unit; fields that do not apply are
-`null`. Malformed pool IDs return 400, unlisted pools return 404, and stale or unavailable indexer
-data returns 503.
+`null`. The default feed includes `deposit`, `withdraw`, `borrow`, `repay`, and `liquidation`;
+liquidity changes and fee collection are omitted. Every row includes `liquidator`, `repaidUsdg`,
+`badDebtUsdg`, and `full`, set to `null` for non-liquidation events. Malformed pool IDs return 400,
+unlisted pools return 404, and stale or unavailable indexer data returns 503.
 
 ## Health endpoint
 

@@ -35,6 +35,8 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
     const events = [
       { kind: 'deposit', poolId, market: marketAddresses[0], block: 100, log: 1, owner },
       { kind: 'borrow', poolId, market: marketAddresses[0], block: 100, log: 4, owner: '0x00000000000000000000000000000000000000bb' },
+      { kind: 'increase_liquidity', poolId, market: marketAddresses[0], block: 103, log: 1, owner },
+      { kind: 'collect_fees', poolId, market: marketAddresses[1], block: 104, log: 1, owner },
       { kind: 'withdraw', poolId, market: marketAddresses[1], block: 100, log: 6, owner: '0x00000000000000000000000000000000000000bb' },
       { kind: 'repay', poolId, market: marketAddresses[0], block: 100, log: 8, owner },
       { kind: 'borrow', poolId: otherPool, market: marketAddresses[0], block: 101, log: 1, owner },
@@ -106,8 +108,12 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
       { kind: 'deposit', blockNumber: '100', logIndex: 1 },
     ]);
     expect(actual.map(({ owner }) => owner)).toContain('0x00000000000000000000000000000000000000bb');
+    expect(actual.map(({ kind }) => kind)).not.toContain('increase_liquidity');
+    expect(actual.map(({ kind }) => kind)).not.toContain('collect_fees');
     expect(new Set(actual.map(({ blockNumber, logIndex }) => `${blockNumber}:${logIndex}`)).size).toBe(6);
     expect(indexer.requests.some(({ query }) => query.includes('query PoolActivity('))).toBe(true);
+    const defaultQuery = indexer.requests.find(({ query }) => query.includes('query PoolActivity('))?.query ?? '';
+    expect(defaultQuery).toContain('kind_in: ["deposit", "withdraw", "borrow", "repay"]');
 
     const borrows = await service.activity(poolId, 25, undefined, 'borrow');
     expect(borrows.items.map(({ kind }) => kind)).toEqual(['borrow', 'borrow']);
@@ -122,6 +128,51 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
       badDebtUsdg: '20',
       full: true,
     });
+    const liquidationOnly = await service.activity(poolId, 25, undefined, 'liquidation');
+    expect(liquidationOnly.items.map(({ kind }) => kind)).toEqual(['liquidation']);
+    expect(indexer.requests.at(-1)?.query).not.toContain('loanActivitys(');
+    expect(actual[0]).toMatchObject({ liquidator: null, repaidUsdg: null, badDebtUsdg: null, full: null });
+  });
+
+  it('paginates pool rows in block and log order when timestamps are shared across blocks', async () => {
+    const events = Array.from({ length: 270 }, (_, index) => ({
+      index,
+      market: marketAddresses[index % 2],
+      block: 100 + Math.floor(index / 9),
+      log: index % 9,
+    }));
+    const indexer = await withIndexer((table) =>
+      table === schema.loanActivity
+        ? events.map(({ index, market, block, log }) => ({
+            market, poolId, blockNumber: BigInt(block), logIndex: log,
+            timestamp: 1_800_000_000n + BigInt(Math.floor(index / 45)),
+            transactionHash: hash(index), tokenId: BigInt(index + 1), owner,
+            kind: 'borrow', amountUsdg: BigInt(index + 1),
+            liquidityDelta: null, amount0: null, amount1: null,
+          }))
+        : [],
+    );
+    const service = new PoolActivityService(
+      indexer.indexer as never,
+      { findListedMarkets: vi.fn(async () => marketAddresses.map((address) => ({ address }))) } as never,
+      new TtlCacheService(),
+    );
+    for (const limit of [1, 25, 100]) {
+      const actual: Array<{ blockNumber: string; logIndex: number; transactionHash: string }> = [];
+      let cursor: string | undefined;
+      let hasMore = true;
+      while (hasMore) {
+        const page = await service.activity(poolId, limit, cursor);
+        actual.push(...page.items as typeof actual);
+        cursor = page.nextCursor ?? undefined;
+        hasMore = page.hasMore;
+      }
+      const expected = events
+        .map(({ index, block, log }) => ({ blockNumber: String(block), logIndex: log, transactionHash: hash(index) }))
+        .sort((a, b) => Number(BigInt(b.blockNumber) - BigInt(a.blockNumber)) || b.logIndex - a.logIndex);
+      expect(actual.map(({ blockNumber, logIndex, transactionHash }) => ({ blockNumber, logIndex, transactionHash }))).toEqual(expected);
+      expect(new Set(actual.map(({ transactionHash }) => transactionHash)).size).toBe(270);
+    }
   });
 
   it('rejects fields that are absent from the pinned indexer schema', async () => {
@@ -376,7 +427,7 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
       {
         readContract: vi.fn(
           async (_address: string, _abi: unknown, functionName: string) =>
-            functionName === 'listingOf' ? { listed: true } : 7500,
+            functionName === 'listingOf' ? { listed: true, tier: 1 } : 7500,
         ),
       } as never,
       indexer.indexer as never,
