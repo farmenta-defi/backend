@@ -2,14 +2,12 @@ import { BadRequestException, Injectable } from '@nestjs/common';
 import { isAddress } from 'viem';
 import { IndexerService } from '../indexer/indexer.service.js';
 import { DeploymentService } from '../markets/deployment.service.js';
-import { TtlCacheService } from '../shared/ttl-cache.service.js';
 
 @Injectable()
 export class ActivityService {
   constructor(
     private readonly indexer: IndexerService,
     private readonly deployments: DeploymentService,
-    private readonly cache: TtlCacheService,
   ) {}
   async activity(address: string, limit = 25, cursor?: string) {
     if (!isAddress(address) || /^0x0{40}$/i.test(address))
@@ -18,31 +16,26 @@ export class ActivityService {
       throw new BadRequestException('limit must be between 1 and 100');
     if (cursor && !isCursor(cursor))
       throw new BadRequestException('cursor must be blockNumber:logIndex');
-    return this.cache.get(
-      `activity:${address.toLowerCase()}:${limit}:${cursor ?? ''}`,
-      async () => {
-        const markets = this.deployments.all().map(([name, market]) => ({
-          name,
-          address: market.address,
-        }));
-        const data = await this.indexer.query<ActivityData>(
-          activityQuery(markets, cursor),
-          activityVariables(address, limit, markets, cursor),
-        );
-        const entries = [
-          ...activityItems(data, 'loan'),
-          ...activityItems(data, 'liquidation'),
-          ...activityItems(data, 'vault'),
-        ].sort(compareActivity);
-        const page = entries.slice(0, limit);
-        const last = page.at(-1);
-        return {
-          items: page,
-          nextCursor: last ? cursorOf(last) : null,
-          hasMore: entries.length > limit,
-        };
-      },
+    const markets = this.deployments.all().map(([name, market]) => ({
+      name,
+      address: market.address,
+    }));
+    const data = await this.indexer.query<ActivityData>(
+      activityQuery(markets, cursor),
+      activityVariables(address, limit, markets, cursor),
     );
+    const entries = [
+      ...activityItems(data, 'loan'),
+      ...activityItems(data, 'liquidation'),
+      ...activityItems(data, 'vault'),
+    ].sort(compareActivity);
+    const page = entries.slice(0, limit);
+    const last = page.at(-1);
+    return {
+      items: page,
+      nextCursor: last ? cursorOf(last) : null,
+      hasMore: entries.length > limit,
+    };
   }
 }
 

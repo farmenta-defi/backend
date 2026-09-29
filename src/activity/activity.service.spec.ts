@@ -43,7 +43,6 @@ describe('ActivityService', () => {
           ],
         ],
       } as never,
-      { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
     );
 
     const address = '0x00000000000000000000000000000000000000aa';

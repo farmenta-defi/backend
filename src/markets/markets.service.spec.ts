@@ -2,6 +2,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { MarketsService } from './markets.service.js';
 
 describe('MarketsService', () => {
+  it('serves /markets from chain data without consulting a lagging indexer', async () => {
+    const indexer = {
+      query: vi.fn().mockRejectedValue(new Error('Indexer is behind')),
+    };
+    const service = new MarketsService(
+      { all: () => [] },
+      {} as never,
+      indexer as never,
+      {} as never,
+      { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
+    );
+
+    await expect(service.markets()).resolves.toEqual([]);
+    expect(indexer.query).not.toHaveBeenCalled();
+  });
+
   it('uses the contract utilization definition and applies the tier reserve factor', async () => {
     const reads = vi
       .fn()

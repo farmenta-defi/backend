@@ -93,7 +93,6 @@ describe('PortfolioService', () => {
           poolId === listedPool ? deployment : undefined,
       } as never,
       rpc as never,
-      { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
     );
 
     const result = await service.portfolio(
