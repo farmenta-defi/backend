@@ -7,12 +7,25 @@ export class SettingsService {
   readonly rpcUrl = requireUrl('RPC_URL');
   readonly indexerStatusUrl = requireUrl('INDEXER_STATUS_URL');
   readonly indexerGraphqlUrl = requireUrl('INDEXER_GRAPHQL_URL');
+  readonly maxIndexerLagSeconds = positiveInteger(
+    process.env.INDEXER_MAX_LAG_SECONDS,
+    60,
+  );
   readonly deployment = process.env.FARMENTA_DEPLOYMENT;
   readonly corsOrigins = (process.env.CORS_ORIGINS ?? '')
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
   readonly trustProxy = process.env.TRUST_PROXY === '1';
+}
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || value === '') return fallback;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new Error('INDEXER_MAX_LAG_SECONDS must be a non-negative integer');
+  }
+  return parsed;
 }
 
 function requireUrl(name: string): string {
