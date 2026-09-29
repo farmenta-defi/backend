@@ -89,13 +89,13 @@ describe('IndexerService', () => {
     const indexer = service();
 
     await expect(
-      indexer.query('query { pools { items { id } } }'),
+      indexer.query('query { pools { items { id } } }', {}, 'cached:pools'),
     ).resolves.toEqual({
       pools: [],
     });
     await vi.advanceTimersByTimeAsync(2_000);
     await expect(
-      indexer.query('query { pools { items { id } } }'),
+      indexer.query('query { pools { items { id } } }', {}, 'cached:pools'),
     ).rejects.toMatchObject({ status: 503 });
     expect(fetch).toHaveBeenCalledTimes(2);
   });

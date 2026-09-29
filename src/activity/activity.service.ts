@@ -23,6 +23,7 @@ export class ActivityService {
     const data = await this.indexer.query<ActivityData>(
       activityQuery(markets, cursor),
       activityVariables(address, limit, markets, cursor),
+      `activity:${address.toLowerCase()}:${limit}:${cursor ?? ''}`,
     );
     const entries = [
       ...activityItems(data, 'loan'),
