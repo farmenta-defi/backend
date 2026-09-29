@@ -10,8 +10,8 @@ export class IndexerService {
   ) {}
 
   async lagSeconds(): Promise<number> {
-    return this.cache.get(
-      'indexer:status-lag',
+    const timestamp = await this.cache.get(
+      'indexer:status-timestamp',
       async () => {
         try {
           const response = await fetch(this.settings.indexerStatusUrl, {
@@ -28,13 +28,14 @@ export class IndexerService {
             timestamp <= 0
           )
             throw new Error('Indexer status timestamp is unavailable');
-          return Math.max(0, Math.floor(Date.now() / 1_000) - timestamp);
+          return timestamp;
         } catch {
           throw new ServiceUnavailableException('Indexer is unavailable');
         }
       },
       5_000,
     );
+    return Math.max(0, Math.floor(Date.now() / 1_000) - timestamp);
   }
 
   async assertFresh(): Promise<number> {

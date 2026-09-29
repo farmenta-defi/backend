@@ -75,6 +75,31 @@ describe('IndexerService', () => {
     ).resolves.toEqual({ pools: [] });
   });
 
+  it('recalculates lag during the status cache window before serving each query', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(120_000);
+    const fetch = vi
+      .fn()
+      .mockResolvedValueOnce(statusResponse(61))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: { pools: [] } }),
+      });
+    vi.stubGlobal('fetch', fetch);
+    const indexer = service();
+
+    await expect(
+      indexer.query('query { pools { items { id } } }'),
+    ).resolves.toEqual({
+      pools: [],
+    });
+    await vi.advanceTimersByTimeAsync(2_000);
+    await expect(
+      indexer.query('query { pools { items { id } } }'),
+    ).rejects.toMatchObject({ status: 503 });
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it.each([
     [
       'missing timestamp',
