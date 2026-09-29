@@ -35,6 +35,19 @@ bun run src/main.ts
 
 `DATABASE_URL` must name database `farmenta`; startup and migrations reject another database.
 `RPC_URL` is server-only. Do not put it in frontend environment variables or logs.
+`INDEXER_MAX_LAG_SECONDS` defaults to 60. Reads from the indexer return 503 when its latest
+indexed block is older than that threshold.
+
+## Pool activity
+
+`GET /pools/:poolId/activity` returns collateral deposits and withdrawals, borrows, repayments,
+and liquidations for a listed pool across all owners. Results are ordered by block and log index,
+newest first, with `limit` (1–100, default 25), `cursor` (`blockNumber:logIndex`), and an optional
+`kind` filter. Amounts are decimal strings in the smallest unit; fields that do not apply are
+`null`. The default feed includes `deposit`, `withdraw`, `borrow`, `repay`, and `liquidation`;
+liquidity changes and fee collection are omitted. Every row includes `liquidator`, `repaidUsdg`,
+`badDebtUsdg`, and `full`, set to `null` for non-liquidation events. Malformed pool IDs return 400,
+unlisted pools return 404, and stale or unavailable indexer data returns 503.
 
 ## Health endpoint
 
@@ -92,6 +105,7 @@ instance until shared scheduling is introduced by a later ticket.
 
 ```sh
 bun run lint
+bun run typecheck
 bun run test
 bun run test:e2e
 bun run build

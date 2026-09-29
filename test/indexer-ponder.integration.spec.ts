@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
-import * as schema from '../ponder.schema.ts';
+import * as schema from '../ponder.schema.js';
 import { ActivityService } from '../src/activity/activity.service.js';
+import { PoolActivityService } from '../src/activity/pool-activity.service.js';
 import { MarketsService } from '../src/markets/markets.service.js';
 import { PortfolioService } from '../src/portfolio/portfolio.service.js';
 import { TtlCacheService } from '../src/shared/ttl-cache.service.js';
@@ -28,6 +29,152 @@ afterEach(async () => {
 });
 
 describe('backend indexer queries against Ponder 0.17.10', () => {
+  it('paginates pool activity across wallets and tables, ordered by block and log index', async () => {
+    const otherPool = `0x${'b'.repeat(64)}`;
+    const emptyPool = `0x${'c'.repeat(64)}`;
+    const events = [
+      { kind: 'deposit', poolId, market: marketAddresses[0], block: 100, log: 1, owner },
+      { kind: 'borrow', poolId, market: marketAddresses[0], block: 100, log: 4, owner: '0x00000000000000000000000000000000000000bb' },
+      { kind: 'increase_liquidity', poolId, market: marketAddresses[0], block: 103, log: 1, owner },
+      { kind: 'collect_fees', poolId, market: marketAddresses[1], block: 104, log: 1, owner },
+      { kind: 'withdraw', poolId, market: marketAddresses[1], block: 100, log: 6, owner: '0x00000000000000000000000000000000000000bb' },
+      { kind: 'repay', poolId, market: marketAddresses[0], block: 100, log: 8, owner },
+      { kind: 'borrow', poolId: otherPool, market: marketAddresses[0], block: 101, log: 1, owner },
+      { kind: 'borrow', poolId, market: marketAddresses[1], block: 102, log: 1, owner },
+      { kind: 'liquidation', poolId, market: marketAddresses[0], block: 100, log: 11, owner },
+    ];
+    const indexer = await withIndexer((table) => {
+      if (table === schema.loanActivity)
+        return events
+          .filter((event) => event.kind !== 'liquidation')
+          .map((event, index) => ({
+            market: event.market,
+            poolId: event.poolId,
+            blockNumber: BigInt(event.block),
+            logIndex: event.log,
+            timestamp: 1_800_000_000n + BigInt(index),
+            transactionHash: hash(index),
+            tokenId: BigInt(index + 1),
+            owner: event.owner,
+            kind: event.kind,
+            amountUsdg: event.kind === 'borrow' || event.kind === 'repay' ? 100n : null,
+            liquidityDelta: null,
+            amount0: null,
+            amount1: null,
+          }));
+      if (table === schema.liquidation)
+        return [{
+          market: marketAddresses[0],
+          poolId,
+          blockNumber: 100n,
+          logIndex: 11,
+          timestamp: 1_800_000_010n,
+          transactionHash: hash(10),
+          tokenId: 10n,
+          owner,
+          liquidator: '0x00000000000000000000000000000000000000cc',
+          full: true,
+          repaidUsdg: 500n,
+          badDebtUsdg: 20n,
+          socializedUsdg: 0n,
+          out0: 0n,
+          out1: 0n,
+        }];
+      return [];
+    });
+    const service = new PoolActivityService(
+      indexer.indexer as never,
+      { findListedMarkets: vi.fn(async (id: string) => id === poolId || id === emptyPool
+        ? marketAddresses.map((address) => ({ address }))
+        : []) } as never,
+      new TtlCacheService(),
+    );
+    const actual: Array<{ blockNumber: string; logIndex: number; kind: string; owner: string }> = [];
+    let cursor: string | undefined;
+    let hasMore = true;
+    while (hasMore) {
+      const page = await service.activity(poolId, 1, cursor);
+      actual.push(...page.items as typeof actual);
+      cursor = page.nextCursor ?? undefined;
+      hasMore = page.hasMore;
+    }
+
+    expect(actual.map(({ kind, blockNumber, logIndex }) => ({ kind, blockNumber, logIndex }))).toEqual([
+      { kind: 'borrow', blockNumber: '102', logIndex: 1 },
+      { kind: 'liquidation', blockNumber: '100', logIndex: 11 },
+      { kind: 'repay', blockNumber: '100', logIndex: 8 },
+      { kind: 'withdraw', blockNumber: '100', logIndex: 6 },
+      { kind: 'borrow', blockNumber: '100', logIndex: 4 },
+      { kind: 'deposit', blockNumber: '100', logIndex: 1 },
+    ]);
+    expect(actual.map(({ owner }) => owner)).toContain('0x00000000000000000000000000000000000000bb');
+    expect(actual.map(({ kind }) => kind)).not.toContain('increase_liquidity');
+    expect(actual.map(({ kind }) => kind)).not.toContain('collect_fees');
+    expect(new Set(actual.map(({ blockNumber, logIndex }) => `${blockNumber}:${logIndex}`)).size).toBe(6);
+    expect(indexer.requests.some(({ query }) => query.includes('query PoolActivity('))).toBe(true);
+    const defaultQuery = indexer.requests.find(({ query }) => query.includes('query PoolActivity('))?.query ?? '';
+    expect(defaultQuery).toContain('kind_in: ["deposit", "withdraw", "borrow", "repay"]');
+
+    const borrows = await service.activity(poolId, 25, undefined, 'borrow');
+    expect(borrows.items.map(({ kind }) => kind)).toEqual(['borrow', 'borrow']);
+    expect(await service.activity(emptyPool)).toEqual({ items: [], nextCursor: null, hasMore: false });
+    const liquidation = (await service.activity(poolId, 25)).items.find(({ kind }) => kind === 'liquidation');
+    expect(liquidation).toMatchObject({
+      kind: 'liquidation',
+      tokenId: '10',
+      amountUsdg: null,
+      liquidator: '0x00000000000000000000000000000000000000cc',
+      repaidUsdg: '500',
+      badDebtUsdg: '20',
+      full: true,
+    });
+    const liquidationOnly = await service.activity(poolId, 25, undefined, 'liquidation');
+    expect(liquidationOnly.items.map(({ kind }) => kind)).toEqual(['liquidation']);
+    expect(indexer.requests.at(-1)?.query).not.toContain('loanActivitys(');
+    expect(actual[0]).toMatchObject({ liquidator: null, repaidUsdg: null, badDebtUsdg: null, full: null });
+  });
+
+  it('paginates pool rows in block and log order when timestamps are shared across blocks', async () => {
+    const events = Array.from({ length: 270 }, (_, index) => ({
+      index,
+      market: marketAddresses[index % 2],
+      block: 100 + Math.floor(index / 9),
+      log: index % 9,
+    }));
+    const indexer = await withIndexer((table) =>
+      table === schema.loanActivity
+        ? events.map(({ index, market, block, log }) => ({
+            market, poolId, blockNumber: BigInt(block), logIndex: log,
+            timestamp: 1_800_000_000n + BigInt(Math.floor(index / 45)),
+            transactionHash: hash(index), tokenId: BigInt(index + 1), owner,
+            kind: 'borrow', amountUsdg: BigInt(index + 1),
+            liquidityDelta: null, amount0: null, amount1: null,
+          }))
+        : [],
+    );
+    const service = new PoolActivityService(
+      indexer.indexer as never,
+      { findListedMarkets: vi.fn(async () => marketAddresses.map((address) => ({ address }))) } as never,
+      new TtlCacheService(),
+    );
+    for (const limit of [1, 25, 100]) {
+      const actual: Array<{ blockNumber: string; logIndex: number; transactionHash: string }> = [];
+      let cursor: string | undefined;
+      let hasMore = true;
+      while (hasMore) {
+        const page = await service.activity(poolId, limit, cursor);
+        actual.push(...page.items as typeof actual);
+        cursor = page.nextCursor ?? undefined;
+        hasMore = page.hasMore;
+      }
+      const expected = events
+        .map(({ index, block, log }) => ({ blockNumber: String(block), logIndex: log, transactionHash: hash(index) }))
+        .sort((a, b) => Number(BigInt(b.blockNumber) - BigInt(a.blockNumber)) || b.logIndex - a.logIndex);
+      expect(actual.map(({ blockNumber, logIndex, transactionHash }) => ({ blockNumber, logIndex, transactionHash }))).toEqual(expected);
+      expect(new Set(actual.map(({ transactionHash }) => transactionHash)).size).toBe(270);
+    }
+  });
+
   it('rejects fields that are absent from the pinned indexer schema', async () => {
     const indexer = await withIndexer(() => []);
 
@@ -51,6 +198,7 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
           .filter((event) => event.table === 0)
           .map((event) => ({
             market: event.market,
+            poolId,
             blockNumber: BigInt(event.blockNumber),
             logIndex: event.index,
             timestamp: 1_800_000_000n,
@@ -105,7 +253,6 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
     const service = new ActivityService(
       indexer.indexer as never,
       deployments as never,
-      new TtlCacheService(),
     );
     const expected = events
       .map((event) => ({
@@ -132,7 +279,12 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
       const cursors = new Set<string>();
       while (hasMore) {
         const page = await service.activity(owner, limit, cursor);
-        actual.push(...(page.items as typeof actual));
+        actual.push(...page.items.map((item) => ({
+          market: String(item.market),
+          blockNumber: String(item.blockNumber),
+          logIndex: Number(item.logIndex),
+          category: String(item.category),
+        })));
         cursor = page.nextCursor ?? undefined;
         hasMore = page.hasMore;
         if (cursor) {
@@ -206,7 +358,10 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
         all: () => [['blueChip', deployment]],
         resolve: async (market: unknown) => market,
       } as never,
-      { findListedMarket: async () => deployment } as never,
+      {
+        findListedMarket: async () => deployment,
+        findListedMarkets: async () => [deployment],
+      } as never,
       {
         multicall: vi.fn(async (calls: unknown[]) =>
           calls.map(() => ({
@@ -271,7 +426,7 @@ describe('backend indexer queries against Ponder 0.17.10', () => {
       {
         readContract: vi.fn(
           async (_address: string, _abi: unknown, functionName: string) =>
-            functionName === 'listingOf' ? { listed: true } : 7500,
+            functionName === 'listingOf' ? { listed: true, tier: 1 } : 7500,
         ),
       } as never,
       indexer.indexer as never,

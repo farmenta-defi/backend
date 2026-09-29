@@ -80,7 +80,8 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
       pools
         .filter((pool) => pool.tier === market.tier)
         .map(async (pool) => {
-          if (!(await this.isListed(market, pool.id))) return undefined;
+          const listing = await this.isListed(market, pool.id);
+          if (!listing.listed || listing.tier !== market.tier) return undefined;
           return {
             ...pool,
             effectiveLtBps: await this.rpc.readContract<number>(
@@ -282,13 +283,11 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   }
   private async isListed(market: ResolvedMarketDeployment, poolId: string) {
     return this.cache.get(`listing:${market.policy}:${poolId}`, async () => {
-      const listing = await this.rpc.readContract<{ listed: boolean }>(
-        market.policy,
-        policyAbi,
-        'listingOf',
-        [poolId],
-      );
-      return listing.listed;
+      const listing = await this.rpc.readContract<{
+        listed: boolean;
+        tier: number;
+      }>(market.policy, policyAbi, 'listingOf', [poolId]);
+      return { listed: listing.listed, tier: listing.tier };
     });
   }
   async findListedMarket(
@@ -296,9 +295,26 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   ): Promise<ResolvedMarketDeployment | undefined> {
     for (const [, raw] of this.deployments.all()) {
       const market = await this.deployments.resolve(raw);
-      if (await this.isListed(market, poolId)) return market;
+      const listing = await this.isListed(market, poolId);
+      if (listing.listed && listing.tier === market.tier) return market;
     }
     return undefined;
+  }
+  async findListedMarkets(poolId: string): Promise<ResolvedMarketDeployment[]> {
+    const listed: ResolvedMarketDeployment[] = [];
+    const policies = new Map<
+      string,
+      Promise<{ listed: boolean; tier: number }>
+    >();
+    for (const [, raw] of this.deployments.all()) {
+      const market = await this.deployments.resolve(raw);
+      const listing =
+        policies.get(market.policy) ?? this.isListed(market, poolId);
+      policies.set(market.policy, listing);
+      const result = await listing;
+      if (result.listed && result.tier === market.tier) listed.push(market);
+    }
+    return listed;
   }
 }
 

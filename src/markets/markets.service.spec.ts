@@ -80,7 +80,7 @@ describe('MarketsService', () => {
         get: vi.fn().mockResolvedValue(market),
       },
       {
-        readContract: vi.fn().mockResolvedValue({ listed: false }),
+        readContract: vi.fn().mockResolvedValue({ listed: false, tier: 1 }),
         getBlockNumber: vi.fn(),
       },
       {
@@ -91,7 +91,12 @@ describe('MarketsService', () => {
           },
         }),
       },
-      { history: vi.fn(), latest: vi.fn(), insert: vi.fn() },
+      {
+        history: vi.fn(),
+        latest: vi.fn(),
+        averageBorrowAprBps: vi.fn(),
+        insert: vi.fn(),
+      },
       { get: (_key: string, load: () => Promise<unknown>) => load() },
     );
 
@@ -111,7 +116,7 @@ describe('MarketsService', () => {
       getBlockNumber: vi.fn().mockResolvedValue(10n),
       readContract: vi.fn(
         async (_address: string, _abi: unknown, name: string) => {
-          if (name === 'listingOf') return { listed: true };
+          if (name === 'listingOf') return { listed: true, tier: 1 };
           if (name === 'effectiveLt') return 7500;
           if (name === 'poolDebt') return 100_000_000n;
           if (name === 'totalAssets') return 1_000_000_000n;
@@ -152,5 +157,35 @@ describe('MarketsService', () => {
       borrowAprPct: '5.00',
       rate6hPct: '6.00',
     });
+  });
+
+  it('returns only the configured market matching the listed pool tier', async () => {
+    const policy = '0x0000000000000000000000000000000000000003';
+    const deployments = [1, 2].map((tier) => ({
+      address: `0x${String(tier).padStart(40, '0')}`,
+      policy,
+      lens: '0x0000000000000000000000000000000000000004',
+      valuer: '0x0000000000000000000000000000000000000005',
+      tier,
+    }));
+    const readContract = vi.fn(async () => ({ listed: true, tier: 2 }));
+    const service = new MarketsService(
+      {
+        all: () => [
+          ['blueChip', deployments[0]],
+          ['meme', deployments[1]],
+        ],
+        resolve: async (deployment: unknown) => deployment,
+      } as never,
+      { readContract } as never,
+      {} as never,
+      {} as never,
+      { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
+    );
+
+    await expect(
+      service.findListedMarkets(`0x${'a'.repeat(64)}`),
+    ).resolves.toEqual([deployments[1]]);
+    expect(readContract).toHaveBeenCalledOnce();
   });
 });
