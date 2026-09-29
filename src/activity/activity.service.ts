@@ -44,6 +44,7 @@ type Activity = {
   timestamp: string;
   blockNumber: string;
   logIndex: number;
+  transactionHash: string;
   [key: string]: unknown;
 };
 type ActivityData = {

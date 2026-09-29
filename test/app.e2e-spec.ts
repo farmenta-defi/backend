@@ -5,6 +5,8 @@ import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module.js';
 import { configureApp } from './../src/app.config.js';
 import { vi } from 'vitest';
+import { PoolActivityService } from '../src/activity/pool-activity.service.js';
+import { parseActivityCursor } from '../src/activity/activity-cursor.js';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -18,9 +20,15 @@ describe('AppController (e2e)', () => {
     process.env.INDEXER_MAX_LAG_SECONDS = '60';
     process.env.FARMENTA_DEPLOYMENT = '';
     process.env.CORS_ORIGINS = 'https://app.farmenta.example';
-    const moduleFixture: TestingModule = await Test.createTestingModule({
+    const moduleBuilder = Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    }).overrideProvider(PoolActivityService).useValue({
+      activity: async (_poolId: string, _limit: number, cursor?: string | string[]) => {
+        parseActivityCursor(cursor);
+        return { items: [], nextCursor: null, hasMore: false };
+      },
+    });
+    const moduleFixture: TestingModule = await moduleBuilder.compile();
 
     app = moduleFixture.createNestApplication();
     configureApp(app);
@@ -53,6 +61,22 @@ describe('AppController (e2e)', () => {
       .expect(200)
       .expect([])
       .then(() => expect(fetch).not.toHaveBeenCalled());
+  });
+
+  it('/pools/:poolId/activity (GET)', () => {
+    return request(app.getHttpServer())
+      .get(`/pools/0x${'a'.repeat(64)}/activity?limit=25&kind=borrow`)
+      .expect(200)
+      .expect({ items: [], nextCursor: null, hasMore: false });
+  });
+
+  it('rejects repeated pool activity cursors and log indexes beyond GraphQL Int32', async () => {
+    await request(app.getHttpServer())
+      .get(`/pools/0x${'a'.repeat(64)}/activity?cursor=1%3A1&cursor=2%3A2`)
+      .expect(400);
+    await request(app.getHttpServer())
+      .get(`/pools/0x${'a'.repeat(64)}/activity?cursor=1%3A2147483648`)
+      .expect(400);
   });
 
   it.each([
