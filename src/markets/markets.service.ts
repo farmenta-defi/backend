@@ -71,7 +71,7 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   }
 
   async pools(tier: string): Promise<ListedPool[]> {
-    return this.cache.get(`pools:${tier}`, () => this.loadPools(tier));
+    return this.loadPools(tier);
   }
   private async loadPools(tier: string): Promise<ListedPool[]> {
     const market = await this.deployments.get(tier);
@@ -98,9 +98,7 @@ export class MarketsService implements OnModuleInit, OnModuleDestroy {
   async pool(poolId: string, range: HistoryRange = '1w') {
     if (!isHex(poolId, { strict: true }) || poolId.length !== 66)
       throw new NotFoundException('Pool is not listed');
-    return this.cache.get(`pool:${poolId.toLowerCase()}:${range}`, () =>
-      this.loadPool(poolId, range),
-    );
+    return this.loadPool(poolId, range);
   }
   private async loadPool(poolId: string, range: HistoryRange) {
     const found = await Promise.all(

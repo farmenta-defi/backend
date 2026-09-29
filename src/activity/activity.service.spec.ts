@@ -2,6 +2,30 @@ import { describe, expect, it, vi } from 'vitest';
 import { ActivityService } from './activity.service.js';
 
 describe('ActivityService', () => {
+  it('rejects an invalid wallet address', async () => {
+    const service = new ActivityService(
+      { query: vi.fn() } as never,
+      { all: () => [] } as never,
+    );
+
+    await expect(service.activity('not-an-address')).rejects.toMatchObject({
+      status: 400,
+    });
+  });
+
+  it('accepts the minimum page size and cursor boundary', async () => {
+    const query = vi.fn().mockResolvedValue({});
+    const service = new ActivityService(
+      { query } as never,
+      { all: () => [] } as never,
+    );
+
+    await expect(
+      service.activity('0x00000000000000000000000000000000000000aa', 1, '0:0'),
+    ).resolves.toMatchObject({ items: [], nextCursor: null, hasMore: false });
+    expect(query).toHaveBeenCalledOnce();
+  });
+
   it('paginates a merged activity feed without duplicates when tables share a timestamp', async () => {
     const rows = (category: string, start: number) =>
       Array.from({ length: 101 }, (_, index) => ({
@@ -43,7 +67,6 @@ describe('ActivityService', () => {
           ],
         ],
       } as never,
-      { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
     );
 
     const address = '0x00000000000000000000000000000000000000aa';

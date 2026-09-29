@@ -39,8 +39,12 @@ bun run src/main.ts
 ## Health endpoint
 
 `GET /health` reports `database`, `rpc`, and `indexer` independently. The indexer result uses
-Ponder's `/status` timestamp to compute lag in seconds. A failed dependency changes the overall
-status to `error` without returning URLs, credentials, or provider error text.
+Ponder's `/status` timestamp to compute lag in seconds. Indexer lag above
+`INDEXER_MAX_LAG_SECONDS` changes its status and the overall status to `error`; the
+default threshold is 60 seconds. Indexer-backed routes return HTTP 503 while the indexer exceeds
+that threshold. The status check is cached for five seconds. `/markets` reads the chain directly
+and remains available when the indexer is behind. A failed dependency changes the overall status
+to `error` without returning URLs, credentials, or provider error text.
 
 Only origins in `CORS_ORIGINS` are accepted. The API applies a 60-requests-per-minute limit per
 IP. Set `TRUST_PROXY=1` only behind the VPS's single trusted reverse proxy so the limiter uses
