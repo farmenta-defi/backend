@@ -21,7 +21,8 @@
     "test:debug": "vitest --inspect-brk --no-file-parallelism",
     "test:e2e": "vitest run --config ./vitest.config.e2e.ts",
     "db:migrate": "bun run scripts/migrate.ts",
-    "abi:sync": "bun run scripts/sync-abis.mjs"
+    "abi:sync": "bun run scripts/sync-abis.mjs",
+    "indexer:schema:sync": "bun run scripts/sync-indexer-schema.mjs"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",
@@ -45,6 +46,7 @@
     "@vitest/coverage-v8": "^4.1.2",
     "oxlint": "^1.58.0",
     "oxlint-tsgolint": "^7.0.2001",
+    "ponder": "0.17.10",
     "prettier": "^3.4.2",
     "source-map-support": "^0.5.21",
     "supertest": "^7.0.0",

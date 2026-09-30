@@ -3,6 +3,22 @@ import { describe, expect, it, vi } from 'vitest';
 import { MarketsService } from './markets.service.js';
 
 describe('MarketsService', () => {
+  it('serves /markets from chain data without consulting a lagging indexer', async () => {
+    const indexer = {
+      query: vi.fn().mockRejectedValue(new Error('Indexer is behind')),
+    };
+    const service = new MarketsService(
+      { all: () => [] },
+      {} as never,
+      indexer as never,
+      {} as never,
+      { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
+    );
+
+    await expect(service.markets()).resolves.toEqual([]);
+    expect(indexer.query).not.toHaveBeenCalled();
+  });
+
   it('uses the contract utilization definition and applies the tier reserve factor', async () => {
     const reads = vi
       .fn()
@@ -65,7 +81,7 @@ describe('MarketsService', () => {
         get: vi.fn().mockResolvedValue(market),
       },
       {
-        readContract: vi.fn().mockResolvedValue({ listed: false }),
+        readContract: vi.fn().mockResolvedValue({ listed: false, tier: 1 }),
         getBlockNumber: vi.fn(),
       },
       {
@@ -76,7 +92,12 @@ describe('MarketsService', () => {
           },
         }),
       },
-      { history: vi.fn(), latest: vi.fn(), insert: vi.fn() },
+      {
+        history: vi.fn(),
+        latest: vi.fn(),
+        averageBorrowAprBps: vi.fn(),
+        insert: vi.fn(),
+      },
       { get: (_key: string, load: () => Promise<unknown>) => load() },
     );
 
@@ -96,7 +117,7 @@ describe('MarketsService', () => {
       getBlockNumber: vi.fn().mockResolvedValue(10n),
       readContract: vi.fn(
         async (_address: string, _abi: unknown, name: string) => {
-          if (name === 'listingOf') return { listed: true };
+          if (name === 'listingOf') return { listed: true, tier: 1 };
           if (name === 'effectiveLt') return 7500;
           if (name === 'acceptsNewPositions') return true;
           if (name === 'paused') return false;
@@ -183,7 +204,7 @@ describe('MarketsService', () => {
             block?: bigint,
           ) => {
             blockReads.push([name, block]);
-            if (name === 'listingOf') return { listed: true };
+            if (name === 'listingOf') return { listed: true, tier: 1 };
             if (name === 'effectiveLt') return 7500;
             if (name === 'acceptsNewPositions') return canBorrow;
             if (name === 'paused') return paused;
@@ -264,7 +285,7 @@ describe('MarketsService', () => {
         getBlockNumber: vi.fn().mockResolvedValue(30n),
         readContract: vi.fn(
           async (_address: string, _abi: unknown, name: string) => {
-            if (name === 'listingOf') return { listed: true };
+            if (name === 'listingOf') return { listed: true, tier: 1 };
             if (name === 'effectiveLt') return 7500;
             if (name === 'acceptsNewPositions') return true;
             if (name === 'paused') return false;
@@ -321,7 +342,7 @@ describe('MarketsService', () => {
             async (_address: string, _abi: unknown, name: string) => {
               if (name === failedRead)
                 throw new ServiceUnavailableException('RPC is unavailable');
-              if (name === 'listingOf') return { listed: true };
+              if (name === 'listingOf') return { listed: true, tier: 1 };
               if (name === 'effectiveLt') return 7500;
               if (name === 'acceptsNewPositions') return true;
               if (name === 'paused') return false;
@@ -348,4 +369,33 @@ describe('MarketsService', () => {
       await expect(service.pool(poolId)).rejects.toMatchObject({ status: 503 });
     },
   );
+  it('returns only the configured market matching the listed pool tier', async () => {
+    const policy = '0x0000000000000000000000000000000000000003';
+    const deployments = [1, 2].map((tier) => ({
+      address: `0x${String(tier).padStart(40, '0')}`,
+      policy,
+      lens: '0x0000000000000000000000000000000000000004',
+      valuer: '0x0000000000000000000000000000000000000005',
+      tier,
+    }));
+    const readContract = vi.fn(async () => ({ listed: true, tier: 2 }));
+    const service = new MarketsService(
+      {
+        all: () => [
+          ['blueChip', deployments[0]],
+          ['meme', deployments[1]],
+        ],
+        resolve: async (deployment: unknown) => deployment,
+      } as never,
+      { readContract } as never,
+      {} as never,
+      {} as never,
+      { get: (_key: string, load: () => Promise<unknown>) => load() } as never,
+    );
+
+    await expect(
+      service.findListedMarkets(`0x${'a'.repeat(64)}`),
+    ).resolves.toEqual([deployments[1]]);
+    expect(readContract).toHaveBeenCalledOnce();
+  });
 });

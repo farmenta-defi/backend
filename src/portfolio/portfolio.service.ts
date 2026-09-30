@@ -6,7 +6,6 @@ import {
 import { isAddress } from 'viem';
 import { IndexerService } from '../indexer/indexer.service.js';
 import { RpcService } from '../rpc/rpc.service.js';
-import { TtlCacheService } from '../shared/ttl-cache.service.js';
 import { lensAbi, marketAbi, valuerAbi } from '../markets/contracts.js';
 import { DeploymentService } from '../markets/deployment.service.js';
 import { MarketsService } from '../markets/markets.service.js';
@@ -28,49 +27,46 @@ export class PortfolioService {
     private readonly deployments: DeploymentService,
     private readonly markets: MarketsService,
     private readonly rpc: RpcService,
-    private readonly cache: TtlCacheService,
   ) {}
 
   async portfolio(address: string) {
     if (!isAddress(address) || /^0x0{40}$/i.test(address))
       throw new BadRequestException('address must be a non-zero address');
-    return this.cache.get(`portfolio:${address.toLowerCase()}`, async () => {
-      const owner = address.toLowerCase();
-      const [positions, loans, vaultBalances] = await Promise.all([
-        this.loadCollection<Record<string, unknown>, 'positions'>(
-          PORTFOLIO_POSITIONS,
-          'positions',
-          owner,
-        ),
-        this.loadCollection<Loan, 'loans'>(PORTFOLIO_LOANS, 'loans', owner),
-        this.loadCollection<
-          { market: `0x${string}`; shares: string },
-          'vaultBalances'
-        >(PORTFOLIO_VAULTS, 'vaultBalances', owner),
-      ]);
-      const wallet = await this.enrichWalletPositions(positions);
-      const custody = await Promise.all(
-        loans.map((loan) => this.enrichLoan(loan)),
-      );
-      const vaultShares = await Promise.all(
-        vaultBalances.map(async (share) => ({
-          ...share,
-          assetsUsdg: (
-            await this.rpc.readContract<bigint>(
-              share.market,
-              marketAbi,
-              'convertToAssets',
-              [BigInt(share.shares)],
-            )
-          ).toString(),
-        })),
-      );
-      return {
-        address: address.toLowerCase(),
-        positions: [...wallet, ...custody],
-        vaultShares,
-      };
-    });
+    const owner = address.toLowerCase();
+    const [positions, loans, vaultBalances] = await Promise.all([
+      this.loadCollection<Record<string, unknown>, 'positions'>(
+        PORTFOLIO_POSITIONS,
+        'positions',
+        owner,
+      ),
+      this.loadCollection<Loan, 'loans'>(PORTFOLIO_LOANS, 'loans', owner),
+      this.loadCollection<
+        { market: `0x${string}`; shares: string },
+        'vaultBalances'
+      >(PORTFOLIO_VAULTS, 'vaultBalances', owner),
+    ]);
+    const wallet = await this.enrichWalletPositions(positions);
+    const custody = await Promise.all(
+      loans.map((loan) => this.enrichLoan(loan)),
+    );
+    const vaultShares = await Promise.all(
+      vaultBalances.map(async (share) => ({
+        ...share,
+        assetsUsdg: (
+          await this.rpc.readContract<bigint>(
+            share.market,
+            marketAbi,
+            'convertToAssets',
+            [BigInt(share.shares)],
+          )
+        ).toString(),
+      })),
+    );
+    return {
+      address: address.toLowerCase(),
+      positions: [...wallet, ...custody],
+      vaultShares,
+    };
   }
 
   private async loadCollection<

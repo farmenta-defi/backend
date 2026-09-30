@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { SettingsService } from '../config/settings.service.js';
 import { RpcService } from '../rpc/rpc.service.js';
 import { HealthRepository } from './health.repository.js';
+import { IndexerService } from '../indexer/indexer.service.js';
 
 @Injectable()
 export class HealthService {
@@ -9,6 +10,7 @@ export class HealthService {
     private readonly repository: HealthRepository,
     private readonly rpc: RpcService,
     private readonly settings: SettingsService,
+    private readonly indexer: IndexerService,
   ) {}
 
   async getHealth() {
@@ -39,7 +41,10 @@ export class HealthService {
 
   private async checkRpc() {
     try {
-      return { status: 'ok' as const, blockNumber: (await this.rpc.getBlockNumber()).toString() };
+      return {
+        status: 'ok' as const,
+        blockNumber: (await this.rpc.getBlockNumber()).toString(),
+      };
     } catch {
       return { status: 'error' as const };
     }
@@ -47,16 +52,13 @@ export class HealthService {
 
   private async checkIndexer() {
     try {
-      const response = await fetch(this.settings.indexerStatusUrl, {
-        signal: AbortSignal.timeout(3_000),
-      });
-      if (!response.ok) return { status: 'error' as const };
-      const payload = (await response.json()) as { robinhood?: { block?: { timestamp?: number } } };
-      const timestamp = payload.robinhood?.block?.timestamp;
-      if (!timestamp) return { status: 'error' as const };
+      const lagSeconds = await this.indexer.lagSeconds();
       return {
-        status: 'ok' as const,
-        lagSeconds: Math.max(0, Math.floor(Date.now() / 1_000) - timestamp),
+        status:
+          lagSeconds <= this.settings.maxIndexerLagSeconds
+            ? ('ok' as const)
+            : ('error' as const),
+        lagSeconds,
       };
     } catch {
       return { status: 'error' as const };

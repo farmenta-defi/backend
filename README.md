@@ -35,12 +35,29 @@ bun run src/main.ts
 
 `DATABASE_URL` must name database `farmenta`; startup and migrations reject another database.
 `RPC_URL` is server-only. Do not put it in frontend environment variables or logs.
+`INDEXER_MAX_LAG_SECONDS` defaults to 60. Reads from the indexer return 503 when its latest
+indexed block is older than that threshold.
+
+## Pool activity
+
+`GET /pools/:poolId/activity` returns collateral deposits and withdrawals, borrows, repayments,
+and liquidations for a listed pool across all owners. Results are ordered by block and log index,
+newest first, with `limit` (1–100, default 25), `cursor` (`blockNumber:logIndex`), and an optional
+`kind` filter. Amounts are decimal strings in the smallest unit; fields that do not apply are
+`null`. The default feed includes `deposit`, `withdraw`, `borrow`, `repay`, and `liquidation`;
+liquidity changes and fee collection are omitted. Every row includes `liquidator`, `repaidUsdg`,
+`badDebtUsdg`, and `full`, set to `null` for non-liquidation events. Malformed pool IDs return 400,
+unlisted pools return 404, and stale or unavailable indexer data returns 503.
 
 ## Health endpoint
 
 `GET /health` reports `database`, `rpc`, and `indexer` independently. The indexer result uses
-Ponder's `/status` timestamp to compute lag in seconds. A failed dependency changes the overall
-status to `error` without returning URLs, credentials, or provider error text.
+Ponder's `/status` timestamp to compute lag in seconds. Indexer lag above
+`INDEXER_MAX_LAG_SECONDS` changes its status and the overall status to `error`; the
+default threshold is 60 seconds. Indexer-backed routes return HTTP 503 while the indexer exceeds
+that threshold. The status check is cached for five seconds. `/markets` reads the chain directly
+and remains available when the indexer is behind. A failed dependency changes the overall status
+to `error` without returning URLs, credentials, or provider error text.
 
 Only origins in `CORS_ORIGINS` are accepted. The API applies a 60-requests-per-minute limit per
 IP. Set `TRUST_PROXY=1` only behind the VPS's single trusted reverse proxy so the limiter uses
@@ -88,6 +105,7 @@ instance until shared scheduling is introduced by a later ticket.
 
 ```sh
 bun run lint
+bun run typecheck
 bun run test
 bun run test:e2e
 bun run build
