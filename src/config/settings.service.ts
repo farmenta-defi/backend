@@ -5,6 +5,8 @@ export class SettingsService {
   readonly port = Number(process.env.PORT ?? 3000);
   readonly databaseUrl = requireUrl('DATABASE_URL');
   readonly rpcUrl = requireUrl('RPC_URL');
+  /** Tried when RPC_URL fails or times out. Optional. */
+  readonly rpcFallbackUrl = optionalUrl('RPC_FALLBACK_URL');
   readonly indexerStatusUrl = requireUrl('INDEXER_STATUS_URL');
   readonly indexerGraphqlUrl = requireUrl('INDEXER_GRAPHQL_URL');
   readonly maxIndexerLagSeconds = nonNegativeInteger(
@@ -29,6 +31,13 @@ function nonNegativeInteger(
     throw new Error('INDEXER_MAX_LAG_SECONDS must be a non-negative integer');
   }
   return parsed;
+}
+
+function optionalUrl(name: string): string | undefined {
+  const value = process.env[name];
+  if (!value) return undefined;
+  new URL(value);
+  return value;
 }
 
 function requireUrl(name: string): string {

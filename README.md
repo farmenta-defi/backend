@@ -64,6 +64,7 @@ bun run src/main.ts
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection string for the `farmenta` database. Required. |
 | `RPC_URL` | Server-side RPC endpoint. Required. |
+| `RPC_FALLBACK_URL` | Second RPC endpoint, tried when `RPC_URL` fails or takes longer than 4 seconds. Optional. |
 | `INDEXER_STATUS_URL` | Ponder `/status` endpoint. Required. |
 | `INDEXER_GRAPHQL_URL` | Ponder GraphQL endpoint. Required. |
 | `INDEXER_MAX_LAG_SECONDS` | Maximum accepted indexer lag; defaults to `60`. |
